@@ -1,0 +1,19 @@
+name: ttarasori-gpu
+message: seed-vc v1
+image: quay.io/vessl-ai/torch:2.3.1-cuda12.1-r5
+import:
+  /root/ttarasori: git://github.com/minsuk-byun/ttarasori
+run:
+  - workdir: /root/ttarasori/gpu-server
+    command: bash setup.sh
+env:
+  ALLOWED_ORIGINS: https://ttarasori.vercel.app
+ports:
+  - name: api
+    type: http
+    port: 8000
+autoscaling:
+  min: 1
+  max: 1
+  metric: cpu
+  target: 80
