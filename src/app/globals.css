@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f3f4f9;
+  --color-surface: #ffffff;
+  --color-ink: #1b1e3c;
+  --color-muted: #646a8c;
+  --color-line: #dde0ec;
+  --color-key: #e9ebf3;
+  --color-guide: #2f4fd8;
+  --color-guide-soft: #e4e9fd;
+  --color-mine: #d93d76;
+  --color-mine-soft: #fbe5ee;
+  --color-good: #1d936a;
+  --color-warn: #d9922c;
+  --color-bad: #d14848;
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Noto Sans KR", sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  word-break: keep-all;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-guide);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--sweep-to, 100%));
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: var(--len, 4000);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
