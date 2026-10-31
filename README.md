@@ -39,3 +39,16 @@ http://localhost:3000 에서 확인하고, 비교 페이지의 "샘플 음원으
 ## 실제 AI 커버 연결하려면
 
 `src/app/api/cover/route.ts`에 연결 지점을 만들어 두었어요. 음성 변환(RVC, so-vits-svc 등)은 GPU가 필요하므로 Replicate·RunPod·Modal 같은 외부 GPU 서버에서 돌리고, 이 API는 작업 요청과 결과 조회만 맡기면 돼요. `src/app/cover/page.tsx`의 `useFakeJob`을 실제 API 호출로 바꾸면 됩니다.
+
+## 내 PC에서 GPU 서버와 함께 쓰기 (Yonsei VPN)
+
+VESSL Workspace의 포트는 학교 내부망 주소라서 Yonsei VPN을 켠 PC에서만 접속돼요.
+
+1. Yonsei VPN을 켜요.
+2. 프로젝트 폴더에 `.env.local` 파일을 만들어요.
+   ```
+   GPU_SERVER_URL=http://165.132.46.94:<api 포트>
+   SERVICE_SECRET=<GPU 서버와 같은 값>
+   ```
+   api 포트는 VESSL Workspace 메타데이터의 포트 목록(api, 8000)에서 확인해요. Workspace를 다시 시작하면 바뀌어요.
+3. `start-local.bat`을 더블클릭하거나 `npm install` 후 `npm run dev`를 실행하고 http://localhost:3000 을 열어요.
