@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
 import GuidedRecorder from "@/components/GuidedRecorder";
-import PracticePicker from "@/components/PracticePicker";
+import LibraryPicker, { PracticeEmpty } from "@/components/LibraryPicker";
+import { saveToLibrary } from "@/lib/practiceLibrary";
 import { createJob, fetchChunked, getGpuConfig, getJob, resultUrl, type GpuConfig } from "@/lib/gpu";
 import { getSample } from "@/lib/samples";
 import { setPendingGuide, setRegisteredVoice, type AudioSource } from "@/lib/store";
@@ -64,6 +65,7 @@ export default function CoverPage() {
           if (localUrl.current) URL.revokeObjectURL(localUrl.current);
           localUrl.current = URL.createObjectURL(mix);
           setState({ kind: "done", mixUrl: localUrl.current, vocals });
+          saveToLibrary({ kind: "cover", title: `${song.name.replace(/\.[a-z0-9]+$/i, "")} AI 커버${key ? ` (${keyLabel})` : ""}`, mix, vocals });
           return;
         }
         const step = s.status === "queued" ? 1 : s.step.includes("분리") ? 1 : s.step.includes("변환") ? 2 : 3;
@@ -205,15 +207,18 @@ export default function CoverPage() {
             </div>
           )}
           {!song && songSource === "practice" ? (
-            <PracticePicker
+            <LibraryPicker
+              kinds={["practice"]}
+              pickLabel="이 곡으로 커버"
+              empty={<PracticeEmpty />}
               onPick={(p) => {
-                setSong({ name: `${p.title}.mp3`, blob: p.mix, origin: "file" });
+                setSong({ name: `${p.title}.mp3`, blob: p.mix, origin: "library" });
                 setState({ kind: "idle" });
               }}
             />
           ) : (
             <AudioInput
-              label={song?.name.endsWith(".mp3") && songSource === "practice" ? "연습곡" : "원곡"}
+              label={song?.origin === "library" ? "연습곡" : "원곡"}
               hint="커버하고 싶은 노래 파일을 올려 주세요(8분, 60MB 이하). 보컬은 자동으로 분리돼요."
               tone="guide"
               value={song}

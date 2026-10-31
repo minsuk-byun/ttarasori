@@ -4,7 +4,7 @@
 export interface AudioSource {
   name: string;
   blob: Blob;
-  origin: "file" | "record" | "sample" | "cover";
+  origin: "file" | "record" | "sample" | "cover" | "library";
 }
 
 let pendingGuide: AudioSource | null = null;

@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
+import LibraryPicker from "@/components/LibraryPicker";
 import { DeviationChart, PianoRoll, scoreColor } from "@/components/Charts";
 import { compareFeatures, fmtTime, type Comparison, type Issue, type Segment } from "@/lib/audio/compare.ts";
 import { decodeToMono } from "@/lib/audio/decode.ts";
 import { extractFeatures } from "@/lib/audio/features.ts";
 import { SAMPLE_RATE } from "@/lib/audio/synth.ts";
 import { getSample } from "@/lib/samples";
+import { saveToLibrary } from "@/lib/practiceLibrary";
 import { takePendingGuide, type AudioSource } from "@/lib/store";
 
 type Status = { kind: "idle" } | { kind: "working"; step: string; p: number } | { kind: "error"; msg: string };
@@ -16,6 +18,7 @@ export default function ComparePage() {
   const [guide, setGuide] = useState<AudioSource | null>(null);
   const [mine, setMine] = useState<AudioSource | null>(null);
   const [playAlong, setPlayAlong] = useState<AudioSource | null>(null);
+  const [libFor, setLibFor] = useState<"guide" | "mine" | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [result, setResult] = useState<Comparison | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
@@ -50,6 +53,15 @@ export default function ComparePage() {
       }
       setResult(c);
       setStatus({ kind: "idle" });
+      // 직접 녹음하거나 올린 내 노래는 다음에 다시 고를 수 있게 브라우저에 저장
+      if (m.origin === "record" || m.origin === "file") {
+        const title =
+          m.origin === "record"
+            ? `내 녹음 ${new Date().toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+            : m.name.replace(/\.[a-z0-9]+$/i, "");
+        saveToLibrary({ kind: "mine", title, mix: m.blob, vocals: null });
+        setMine({ ...m, origin: "library" });
+      }
       requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (e) {
       setStatus({ kind: "error", msg: e instanceof Error ? e.message : "분석하지 못했어요. 다른 음원으로 다시 시도해 주세요." });
@@ -75,26 +87,58 @@ export default function ComparePage() {
         </p>
       </div>
 
-      <div className="mt-8 grid gap-4 md:grid-cols-2">
-        <AudioInput
-          label="AI 커버"
-          hint="기준이 될 음원이에요. 반주 없는 보컬 음원이면 가장 정확해요."
-          tone="guide"
-          value={guide}
-          onChange={(v) => {
-            setGuide(v);
-            setPlayAlong(null);
-          }}
-        />
-        <AudioInput
-          label="내가 부른 노래"
-          hint="같은 곡을 직접 부른 녹음이에요. 시작 시점이 달라도 자동으로 맞춰요."
-          tone="mine"
-          value={mine}
-          onChange={setMine}
-          allowRecord
-          playAlong={playAlong ?? guide}
-        />
+      <div className="mt-8 grid items-start gap-4 md:grid-cols-2">
+        {libFor === "guide" ? (
+          <LibraryPicker
+            kinds={["cover", "practice"]}
+            pickLabel="기준으로 쓰기"
+            tone="guide"
+            onClose={() => setLibFor(null)}
+            empty="아직 저장된 AI 커버나 연습곡이 없어요. AI 커버나 연습곡을 만들면 자동으로 저장돼요."
+            onPick={(it) => {
+              // 비교 기준은 반주 없는 보컬이 정확하고, 녹음할 때는 반주가 있는 완성곡을 틀어 줘요
+              setGuide({ name: `${it.title} (보컬)`, blob: it.vocals ?? it.mix, origin: "library" });
+              setPlayAlong(it.vocals ? { name: it.title, blob: it.mix, origin: "library" } : null);
+              setLibFor(null);
+            }}
+          />
+        ) : (
+          <AudioInput
+            label="AI 커버"
+            hint="기준이 될 음원이에요. 반주 없는 보컬 음원이면 가장 정확해요."
+            tone="guide"
+            value={guide}
+            onChange={(v) => {
+              setGuide(v);
+              setPlayAlong(null);
+            }}
+            onOpenLibrary={() => setLibFor("guide")}
+          />
+        )}
+        {libFor === "mine" ? (
+          <LibraryPicker
+            kinds={["mine"]}
+            pickLabel="이 녹음 쓰기"
+            tone="mine"
+            onClose={() => setLibFor(null)}
+            empty="아직 저장된 녹음이 없어요. 여기서 녹음하거나 올린 노래는 비교 분석 후 자동으로 저장돼요."
+            onPick={(it) => {
+              setMine({ name: it.title, blob: it.mix, origin: "library" });
+              setLibFor(null);
+            }}
+          />
+        ) : (
+          <AudioInput
+            label="내가 부른 노래"
+            hint="같은 곡을 직접 부른 녹음이에요. 시작 시점이 달라도 자동으로 맞춰요."
+            tone="mine"
+            value={mine}
+            onChange={setMine}
+            allowRecord
+            playAlong={playAlong ?? guide}
+            onOpenLibrary={() => setLibFor("mine")}
+          />
+        )}
       </div>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">

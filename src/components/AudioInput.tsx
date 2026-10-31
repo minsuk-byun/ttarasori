@@ -12,9 +12,11 @@ interface Props {
   allowRecord?: boolean;
   /** 녹음하는 동안 함께 틀어 줄 가이드 음원 */
   playAlong?: AudioSource | null;
+  /** 저장된 음원에서 고르기 버튼을 눌렀을 때 */
+  onOpenLibrary?: () => void;
 }
 
-export default function AudioInput({ label, hint, tone, value, onChange, allowRecord, playAlong }: Props) {
+export default function AudioInput({ label, hint, tone, value, onChange, allowRecord, playAlong, onOpenLibrary }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [mode, setMode] = useState<"idle" | "recording">("idle");
@@ -139,6 +141,14 @@ export default function AudioInput({ label, hint, tone, value, onChange, allowRe
           {allowRecord && (
             <button onClick={startRecording} className="rounded-lg bg-mine px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110">
               마이크로 녹음하기
+            </button>
+          )}
+          {onOpenLibrary && (
+            <button
+              onClick={onOpenLibrary}
+              className="rounded-lg border border-line bg-paper px-4 py-2.5 text-sm font-semibold hover:border-ink"
+            >
+              저장된 음원에서 고르기
             </button>
           )}
           {allowRecord && playAlong && (
