@@ -15,7 +15,7 @@ export default function Nav() {
       <nav className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2 text-[17px] font-bold tracking-tight">
           <Logo />
-          소리결
+          따라소리
         </Link>
         <div className="ml-auto flex gap-1 text-[15px]">
           {LINKS.map((l) => (

@@ -3,7 +3,7 @@ import Nav from "@/components/Nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "소리결 – AI 커버와 내 노래 비교",
+  title: "따라소리 – AI 커버와 내 노래 비교",
   description: "내 목소리로 AI 커버를 만들고, 직접 부른 노래와 비교해 어디를 어떻게 연습할지 알려 드려요.",
 };
 
