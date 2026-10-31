@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
 import GuidedRecorder from "@/components/GuidedRecorder";
+import PracticePicker from "@/components/PracticePicker";
 import { createJob, fetchChunked, getGpuConfig, getJob, resultUrl, type GpuConfig } from "@/lib/gpu";
 import { getSample } from "@/lib/samples";
 import { setPendingGuide, setRegisteredVoice, type AudioSource } from "@/lib/store";
@@ -22,6 +23,7 @@ export default function CoverPage() {
   const [voice, setVoice] = useState<AudioSource | null>(null);
   const [voiceReady, setVoiceReady] = useState(false);
   const [guided, setGuided] = useState(true);
+  const [songSource, setSongSource] = useState<"file" | "practice">("file");
   const [song, setSong] = useState<AudioSource | null>(null);
   const [key, setKey] = useState(0);
   const [state, setState] = useState<CoverState>({ kind: "idle" });
@@ -182,17 +184,46 @@ export default function CoverPage() {
         </Step>
 
         <Step n={2} title="부를 노래 고르기" done={state.kind === "done"} disabled={!voiceReady}>
-          <AudioInput
-            label="원곡"
-            hint="커버하고 싶은 노래 파일을 올려 주세요(8분, 60MB 이하). 보컬은 자동으로 분리돼요."
-            tone="guide"
-            value={song}
-            onChange={(v) => {
-              setSong(v);
-              setState({ kind: "idle" });
-            }}
-          />
           {!song && (
+            <div className="mb-4 inline-flex rounded-lg border border-line p-0.5" role="tablist" aria-label="노래 고르는 방법">
+              {(
+                [
+                  ["file", "음원 파일 올리기"],
+                  ["practice", "내 연습곡에서 고르기"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  role="tab"
+                  aria-selected={songSource === v}
+                  onClick={() => setSongSource(v)}
+                  className={`rounded-md px-3 py-1.5 text-sm ${songSource === v ? "bg-ink text-white" : "text-muted hover:text-ink"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {!song && songSource === "practice" ? (
+            <PracticePicker
+              onPick={(p) => {
+                setSong({ name: `${p.title}.mp3`, blob: p.mix, origin: "file" });
+                setState({ kind: "idle" });
+              }}
+            />
+          ) : (
+            <AudioInput
+              label={song?.name.endsWith(".mp3") && songSource === "practice" ? "연습곡" : "원곡"}
+              hint="커버하고 싶은 노래 파일을 올려 주세요(8분, 60MB 이하). 보컬은 자동으로 분리돼요."
+              tone="guide"
+              value={song}
+              onChange={(v) => {
+                setSong(v);
+                setState({ kind: "idle" });
+              }}
+            />
+          )}
+          {!song && songSource === "file" && (
             <button onClick={() => setSong(getSample("guide"))} className="mt-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-guide hover:bg-guide-soft">
               샘플 노래 쓰기
             </button>

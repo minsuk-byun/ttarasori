@@ -15,6 +15,7 @@ import {
   type GpuConfig,
   type PracticeNotes,
 } from "@/lib/gpu";
+import { savePracticeSong } from "@/lib/practiceLibrary";
 import { getRegisteredVoice, setPendingGuide, setRegisteredVoice, type AudioSource } from "@/lib/store";
 import { GENRES, INSTRUMENTS, MOODS, inferStyle, stylePrompt, type Style } from "@/lib/style";
 
@@ -131,6 +132,9 @@ export default function PracticePage() {
           const vocals = await fetchChunked(resultUrl(cfg, id, "vocals"), "audio/mpeg").catch(() => null);
           const notes = await getNotes(cfg, id).catch(() => null);
           setGen({ kind: "done", mixUrl: URL.createObjectURL(mix), mix, vocals, notes });
+          const genre = GENRES.find((g) => g.id === style.genre)?.label ?? "연습곡";
+          const title = picked ? `${picked.title.slice(0, 40)} 느낌 연습곡` : `${genre} 연습곡 (${style.bpm} BPM)`;
+          savePracticeSong({ title, mix, vocals });
           return;
         }
         const step = s.status === "queued" ? 0 : s.step.includes("멜로디") ? 1 : s.step.includes("반주") ? 2 : s.step.includes("가이드") ? 3 : 4;
@@ -421,6 +425,7 @@ export default function PracticePage() {
           {gen.kind === "done" && (
             <div className="mt-2 rounded-2xl bg-ink p-5 text-white">
               <div className="font-semibold">연습곡이 완성됐어요</div>
+              <div className="mt-0.5 text-sm text-white/60">이 브라우저에 저장했어요. AI 커버 만들기에서 &quot;내 연습곡에서 고르기&quot;로 다시 쓸 수 있어요.</div>
               <div className="mt-0.5 text-sm text-white/60">
                 {GENRES.find((g) => g.id === style.genre)?.label}, {style.bpm} BPM{picked ? `, "${picked.title}" 느낌` : ""}
               </div>
