@@ -239,7 +239,11 @@ def run_practice(job_id: str):
         vocal = melody44 * 2.2
 
     set_step(job_id, "합치기", 0.92)
-    write_outputs(d, vocal.astype(np.float32), backing, backing_gain=0.85)
+    # 가이드 보컬이 반주를 덮지 않게 음량 맞추기 (보컬 RMS ≈ 반주 RMS × 1.4)
+    b_rms = float(np.sqrt(np.mean(np.square(backing)))) or 1e-6
+    v_rms = float(np.sqrt(np.mean(np.square(vocal)))) or 1e-6
+    vocal = vocal * (b_rms * 1.4 / v_rms)
+    write_outputs(d, vocal.astype(np.float32), backing, backing_gain=1.0)
 
 
 def run_job(job_id: str):
