@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const secret = process.env.SERVICE_SECRET;
   if (!secret) return NextResponse.json({ error: "SERVICE_SECRET 이 설정되지 않았어요." }, { status: 500 });
-  if (!kvEnabled()) return NextResponse.json({ error: "저장소(Upstash)가 연결되지 않았어요." }, { status: 500 });
+  if (!kvEnabled()) return NextResponse.json({ error: "저장소(Redis)가 연결되지 않았어요." }, { status: 500 });
 
   let body: { url?: string; ts?: number; sig?: string };
   try {
