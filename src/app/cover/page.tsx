@@ -54,10 +54,9 @@ export default function CoverPage() {
         if (s.status === "error") throw new Error(s.error ?? "AI 커버를 만들지 못했어요.");
         if (s.status === "done") {
           setState({ kind: "running", step: 3, detail: "결과 받는 중" });
-          const [mix, vocals] = await Promise.all([
-            fetchChunked(resultUrl(cfg, id, "mix"), "audio/mpeg"),
-            fetchChunked(resultUrl(cfg, id, "vocals"), "audio/wav"),
-          ]);
+          const mix = await fetchChunked(resultUrl(cfg, id, "mix"), "audio/mpeg");
+          // AI 보컬만 받기에 실패해도 커버는 보여 주고, 비교에는 커버 음원을 대신 써요
+          const vocals = await fetchChunked(resultUrl(cfg, id, "vocals"), "audio/mpeg").catch(() => null);
           if (localUrl.current) URL.revokeObjectURL(localUrl.current);
           localUrl.current = URL.createObjectURL(mix);
           setState({ kind: "done", mixUrl: localUrl.current, vocals });
@@ -98,7 +97,11 @@ export default function CoverPage() {
     setMoving(true);
     try {
       if (state.vocals) {
-        setPendingGuide({ name: "ai-cover-vocals.wav", blob: state.vocals, origin: "cover" });
+        setPendingGuide({ name: "ai-cover-vocals.mp3", blob: state.vocals, origin: "cover" });
+      } else if (live) {
+        // AI 보컬을 못 받았을 때: 반주가 섞인 커버 음원으로 비교 (정확도는 조금 떨어져요)
+        const r = await fetch(state.mixUrl);
+        setPendingGuide({ name: "ai-cover.mp3", blob: await r.blob(), origin: "cover" });
       } else {
         setPendingGuide({ ...song, name: `ai-cover-${song.name}`, origin: "cover" });
       }
@@ -296,7 +299,7 @@ function VocalsDownload({ blob }: { blob: Blob }) {
   }, [blob]);
   if (!url) return null;
   return (
-    <a href={url} download="ttarasori-ai-vocals.wav" className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20">
+    <a href={url} download="ttarasori-ai-vocals.mp3" className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20">
       AI 보컬만 다운로드
     </a>
   );

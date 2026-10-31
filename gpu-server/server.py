@@ -163,10 +163,11 @@ def run_job(job_id: str):
 
         sf.write(d / "vocals.wav", ai_vocal, SR)
         sf.write(d / "mix.wav", mix, SR)
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(d / "mix.wav"), "-b:a", "192k", str(d / "mix.mp3")],
-            check=True,
-        )
+        for src, dst in (("mix.wav", "mix.mp3"), ("vocals.wav", "vocals.mp3")):
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", str(d / src), "-b:a", "192k", str(d / dst)],
+                check=True,
+            )
         job.update(status="done", step="완료", progress=1.0)
     except subprocess.CalledProcessError as e:
         job.update(status="error", error="음원 처리 중 오류가 났어요.", detail=(e.stderr or b"")[-2000:].decode(errors="ignore"))
@@ -297,4 +298,10 @@ def job_mix(job_id: str, request: Request):
 
 @app.get("/jobs/{job_id}/vocals")
 def job_vocals(job_id: str, request: Request):
+    # wav 는 무료 터널에서 일부 구간 전송이 실패하는 경우가 있어 mp3 로 제공
+    return job_file(job_id, request, "vocals.mp3", "audio/mpeg")
+
+
+@app.get("/jobs/{job_id}/vocals.wav")
+def job_vocals_wav(job_id: str, request: Request):
     return job_file(job_id, request, "vocals.wav", "audio/wav")
