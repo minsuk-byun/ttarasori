@@ -35,6 +35,9 @@ SEED_VC_DIR = Path(os.environ.get("SEED_VC_DIR", "/root/seed-vc"))
 WORK_DIR = Path(os.environ.get("WORK_DIR", "/tmp/ttarasori-jobs"))
 SECRET = os.environ.get("SERVICE_SECRET", "")
 ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+# 내 PC에서 npm run dev 로 띄운 따라소리(VPN 환경)도 항상 허용
+if "*" not in ORIGINS:
+    ORIGINS += ["http://localhost:3000", "http://127.0.0.1:3000"]
 MAX_UPLOAD_MB = 60
 MAX_SONG_SEC = 8 * 60
 JOB_TTL_SEC = 2 * 60 * 60
