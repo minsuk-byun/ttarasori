@@ -198,13 +198,26 @@ def startup():
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=janitor, daemon=True).start()
     # 첫 요청이 느리지 않도록 모델을 미리 올려 둠
-    threading.Thread(target=get_model, daemon=True).start()
+    def warm():
+        try:
+            get_model()
+            print("[ttarasori] 모델 준비 완료", flush=True)
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+
+    threading.Thread(target=warm, daemon=True).start()
 
 
 # ---------------------------------------------------------------- API
 @app.get("/health")
 def health():
-    return {"ok": True, "model_loaded": vc_model is not None, "queue": queue.qsize()}
+    tunnel = Path("/root/tunnel-url.txt")
+    return {
+        "ok": True,
+        "model_loaded": vc_model is not None,
+        "queue": queue.qsize(),
+        "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
+    }
 
 
 async def save_upload(f: UploadFile, dest: Path):
