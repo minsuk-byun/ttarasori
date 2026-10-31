@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Nav />
         {children}
         <footer className="mx-auto max-w-6xl px-4 pb-10 pt-16 text-sm text-muted sm:px-6">
-          데모 버전이에요. 올린 음원은 브라우저 안에서만 분석되고 서버로 전송되지 않아요.
+          데모 버전이에요. 비교 분석은 브라우저 안에서만 이뤄지고, AI 커버를 만들 때만 음원이 GPU 서버로 전송돼요. 서버의 파일은 2시간 뒤 자동으로 지워져요.
         </footer>
       </body>
     </html>

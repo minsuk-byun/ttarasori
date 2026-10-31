@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
-import { createJob, getGpuConfig, getJob, resultUrl, type GpuConfig } from "@/lib/gpu";
+import { createJob, fetchChunked, getGpuConfig, getJob, resultUrl, type GpuConfig } from "@/lib/gpu";
 import { getSample } from "@/lib/samples";
 import { setPendingGuide, type AudioSource } from "@/lib/store";
 
@@ -12,7 +12,7 @@ const COVER_STEPS = ["음원 올리기", "보컬과 반주 분리", "내 목소�
 type CoverState =
   | { kind: "idle" }
   | { kind: "running"; step: number; detail?: string }
-  | { kind: "done"; mixUrl: string; vocalsUrl: string | null }
+  | { kind: "done"; mixUrl: string; vocals: Blob | null }
   | { kind: "error"; msg: string };
 
 export default function CoverPage() {
@@ -53,7 +53,14 @@ export default function CoverPage() {
         const s = await getJob(cfg, id);
         if (s.status === "error") throw new Error(s.error ?? "AI 커버를 만들지 못했어요.");
         if (s.status === "done") {
-          setState({ kind: "done", mixUrl: resultUrl(cfg, id, "mix"), vocalsUrl: resultUrl(cfg, id, "vocals") });
+          setState({ kind: "running", step: 3, detail: "결과 받는 중" });
+          const [mix, vocals] = await Promise.all([
+            fetchChunked(resultUrl(cfg, id, "mix"), "audio/mpeg"),
+            fetchChunked(resultUrl(cfg, id, "vocals"), "audio/wav"),
+          ]);
+          if (localUrl.current) URL.revokeObjectURL(localUrl.current);
+          localUrl.current = URL.createObjectURL(mix);
+          setState({ kind: "done", mixUrl: localUrl.current, vocals });
           return;
         }
         const step = s.status === "queued" ? 1 : s.step.includes("분리") ? 1 : s.step.includes("변환") ? 2 : 3;
@@ -81,7 +88,7 @@ export default function CoverPage() {
         clearInterval(t);
         if (localUrl.current) URL.revokeObjectURL(localUrl.current);
         localUrl.current = URL.createObjectURL(song.blob);
-        setState({ kind: "done", mixUrl: localUrl.current, vocalsUrl: null });
+        setState({ kind: "done", mixUrl: localUrl.current, vocals: null });
       }
     }, 1000);
   }
@@ -90,10 +97,8 @@ export default function CoverPage() {
     if (state.kind !== "done" || !song) return;
     setMoving(true);
     try {
-      if (state.vocalsUrl) {
-        const r = await fetch(state.vocalsUrl);
-        if (!r.ok) throw new Error();
-        setPendingGuide({ name: "ai-cover-vocals.wav", blob: await r.blob(), origin: "cover" });
+      if (state.vocals) {
+        setPendingGuide({ name: "ai-cover-vocals.wav", blob: state.vocals, origin: "cover" });
       } else {
         setPendingGuide({ ...song, name: `ai-cover-${song.name}`, origin: "cover" });
       }
@@ -213,7 +218,7 @@ export default function CoverPage() {
                   disabled={moving}
                   className="rounded-lg bg-mine px-4 py-2.5 text-sm font-semibold hover:brightness-110 disabled:opacity-50"
                 >
-                  {moving ? "AI 보컬 불러오는 중" : "이 커버와 내 노래 비교하기"}
+                  이 커버와 내 노래 비교하기
                 </button>
                 <a
                   href={state.mixUrl}
@@ -222,11 +227,7 @@ export default function CoverPage() {
                 >
                   커버 다운로드
                 </a>
-                {state.vocalsUrl && (
-                  <a href={state.vocalsUrl} className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20">
-                    AI 보컬만 다운로드
-                  </a>
-                )}
+                {state.vocals && <VocalsDownload blob={state.vocals} />}
                 <button onClick={() => setState({ kind: "idle" })} className="rounded-lg px-4 py-2.5 text-sm font-semibold text-white/70 hover:text-white">
                   다시 만들기
                 </button>
@@ -283,5 +284,20 @@ function Progress({ step, detail }: { step: number; detail?: string }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function VocalsDownload({ blob }: { blob: Blob }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(blob);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [blob]);
+  if (!url) return null;
+  return (
+    <a href={url} download="ttarasori-ai-vocals.wav" className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20">
+      AI 보컬만 다운로드
+    </a>
   );
 }

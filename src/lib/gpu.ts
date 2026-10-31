@@ -66,3 +66,31 @@ export async function getJob(cfg: GpuConfig, id: string): Promise<JobStatus> {
 
 export const resultUrl = (cfg: GpuConfig, id: string, kind: "mix" | "vocals") =>
   `${cfg.url}/jobs/${id}/${kind}?t=${encodeURIComponent(cfg.token ?? "")}`;
+
+/**
+ * 결과 파일을 1MB씩 나눠 받기.
+ * 무료 터널에서 큰 파일을 한 번에 받으면 중간에 끊기는 경우가 있어서 Range 요청으로 나눠 받아요.
+ */
+export async function fetchChunked(url: string, type: string, chunk = 1 << 20): Promise<Blob> {
+  const parts: ArrayBuffer[] = [];
+  for (let start = 0; ; start += chunk) {
+    let r: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        r = await fetch(url, { headers: { Range: `bytes=${start}-${start + chunk - 1}` }, cache: "no-store" });
+        if (r.status === 416 || r.ok) break;
+      } catch {
+        r = null;
+      }
+      await new Promise((res) => setTimeout(res, 500 * (attempt + 1)));
+    }
+    if (!r) throw new Error("결과 파일을 받지 못했어요.");
+    if (r.status === 416) break; // 파일 끝을 넘김
+    if (!r.ok) throw new Error(`결과 파일을 받지 못했어요 (HTTP ${r.status}).`);
+    const buf = await r.arrayBuffer();
+    if (r.status === 200) return new Blob([buf], { type }); // 서버가 Range를 무시하고 전체를 줌
+    parts.push(buf);
+    if (buf.byteLength < chunk) break;
+  }
+  return new Blob(parts, { type });
+}
