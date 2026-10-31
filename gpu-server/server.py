@@ -148,7 +148,14 @@ def run_job(job_id: str):
         vocals, inst = separate(Path(job["song"]), d / "sep")
 
         set_step(job_id, "내 목소리로 변환", 0.4)
-        ai_vocal = convert(vocals, Path(job["voice"]), job["key"], job["steps"])
+        # 브라우저 녹음(webm/mp4)도 안정적으로 읽히도록 wav 로 변환
+        voice_wav = d / "voice_ref.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", job["voice"], "-ac", "1", "-ar", "44100", str(voice_wav)],
+            check=True,
+            capture_output=True,
+        )
+        ai_vocal = convert(vocals, voice_wav, job["key"], job["steps"])
 
         set_step(job_id, "반주와 합치기", 0.85)
         acc, _ = librosa.load(str(inst), sr=SR, mono=True)
