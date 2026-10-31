@@ -2,8 +2,17 @@
  * Upstash Redis(REST) 최소 클라이언트. 추가 패키지 없이 fetch만 사용.
  * Vercel Storage에서 Upstash를 연결하면 아래 환경 변수 중 한 쌍이 자동으로 들어와요.
  */
-const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// 연결할 때 접두어를 바꾸면(예: STORAGE_KV_REST_API_URL) 이름이 달라지므로 끝부분으로 찾아요.
+function findEnv(suffixes: string[]): string | undefined {
+  for (const suf of suffixes) {
+    if (process.env[suf]) return process.env[suf];
+    const key = Object.keys(process.env).find((k) => k.endsWith(`_${suf}`) && process.env[k]);
+    if (key) return process.env[key];
+  }
+  return undefined;
+}
+const KV_URL = findEnv(["KV_REST_API_URL", "UPSTASH_REDIS_REST_URL", "REDIS_REST_URL"]);
+const KV_TOKEN = findEnv(["KV_REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN", "REDIS_REST_TOKEN"]);
 
 export const kvEnabled = () => Boolean(KV_URL && KV_TOKEN);
 
