@@ -15,13 +15,17 @@ type Status = { kind: "idle" } | { kind: "working"; step: string; p: number } | 
 export default function ComparePage() {
   const [guide, setGuide] = useState<AudioSource | null>(null);
   const [mine, setMine] = useState<AudioSource | null>(null);
+  const [playAlong, setPlayAlong] = useState<AudioSource | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [result, setResult] = useState<Comparison | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const g = takePendingGuide();
-    if (g) setGuide(g);
+    const p = takePendingGuide();
+    if (p) {
+      setGuide(p.guide);
+      setPlayAlong(p.playAlong);
+    }
   }, []);
 
   const run = useCallback(async (g: AudioSource, m: AudioSource) => {
@@ -77,7 +81,10 @@ export default function ComparePage() {
           hint="기준이 될 음원이에요. 반주 없는 보컬 음원이면 가장 정확해요."
           tone="guide"
           value={guide}
-          onChange={setGuide}
+          onChange={(v) => {
+            setGuide(v);
+            setPlayAlong(null);
+          }}
         />
         <AudioInput
           label="내가 부른 노래"
@@ -86,7 +93,7 @@ export default function ComparePage() {
           value={mine}
           onChange={setMine}
           allowRecord
-          playAlong={guide}
+          playAlong={playAlong ?? guide}
         />
       </div>
 

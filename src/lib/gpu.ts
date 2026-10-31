@@ -95,3 +95,53 @@ export async function fetchChunked(url: string, type: string, chunk = 256 * 1024
   }
   return new Blob(parts, { type });
 }
+
+export interface PracticeRequest {
+  prompt: string;
+  bpm: number;
+  minor: boolean;
+  low: boolean;
+  seed: number;
+  voice?: { blob: Blob; name: string } | null;
+}
+
+export function createPracticeJob(cfg: GpuConfig, req: PracticeRequest, onUpload: (p: number) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("prompt", req.prompt);
+    fd.append("bpm", String(req.bpm));
+    fd.append("minor", String(req.minor));
+    fd.append("low", String(req.low));
+    fd.append("seed", String(req.seed));
+    if (req.voice) fd.append("voice", req.voice.blob, req.voice.name.includes(".") ? req.voice.name : `${req.voice.name}.webm`);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${cfg.url}/practice`);
+    xhr.setRequestHeader("Authorization", `Bearer ${cfg.token}`);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onUpload(e.loaded / e.total);
+    xhr.onload = () => {
+      try {
+        const body = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body.id);
+        else if (xhr.status === 404) reject(new Error("GPU 서버가 아직 연습곡 기능을 모르는 버전이에요. 서버를 새로 시작해야 해요."));
+        else reject(new Error(body.detail ?? "연습곡 요청이 거절됐어요."));
+      } catch {
+        reject(new Error(`GPU 서버 응답을 읽지 못했어요 (HTTP ${xhr.status}).`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("GPU 서버에 연결하지 못했어요. VESSL 서비스가 켜져 있는지 확인해 주세요."));
+    xhr.send(fd);
+  });
+}
+
+export interface PracticeNotes {
+  notes: { midi: number; start: number; dur: number; syllable: string }[];
+  duration: number;
+  bpm: number;
+  tonic: number;
+}
+
+export async function getNotes(cfg: GpuConfig, id: string): Promise<PracticeNotes> {
+  const r = await fetch(`${cfg.url}/jobs/${id}/notes`, { headers: { Authorization: `Bearer ${cfg.token}` } });
+  if (!r.ok) throw new Error("멜로디 정보를 불러오지 못했어요.");
+  return (await r.json()) as PracticeNotes;
+}

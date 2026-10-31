@@ -6,7 +6,7 @@ import AudioInput from "@/components/AudioInput";
 import GuidedRecorder from "@/components/GuidedRecorder";
 import { createJob, fetchChunked, getGpuConfig, getJob, resultUrl, type GpuConfig } from "@/lib/gpu";
 import { getSample } from "@/lib/samples";
-import { setPendingGuide, type AudioSource } from "@/lib/store";
+import { setPendingGuide, setRegisteredVoice, type AudioSource } from "@/lib/store";
 
 const COVER_STEPS = ["음원 올리기", "보컬과 반주 분리", "내 목소리로 변환", "반주와 합치기"];
 
@@ -158,7 +158,10 @@ export default function CoverPage() {
             {!voiceReady && (
               <button
                 disabled={!voice}
-                onClick={() => setVoiceReady(true)}
+                onClick={() => {
+                  setVoiceReady(true);
+                  if (voice) setRegisteredVoice(voice);
+                }}
                 className="rounded-xl bg-ink px-5 py-2.5 font-semibold text-white disabled:opacity-35"
               >
                 이 목소리로 등록하기

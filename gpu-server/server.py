@@ -11,6 +11,7 @@ GET  /jobs/{id}/vocals  AI 보컬만 (wav, 비교 분석용)
 """
 
 import base64
+import json
 import hashlib
 import hmac
 import os
@@ -123,6 +124,42 @@ def convert(source: Path, ref: Path, semitones: int, steps: int) -> np.ndarray:
         os.chdir(cwd)
 
 
+musicgen = None
+musicgen_lock = threading.Lock()
+MUSICGEN_ID = os.environ.get("MUSICGEN_MODEL", "facebook/musicgen-melody")
+
+
+def get_musicgen():
+    """멜로디 조건부 반주 생성 모델 (MusicGen-melody, 비상업 라이선스 CC-BY-NC 4.0)"""
+    global musicgen
+    with musicgen_lock:
+        if musicgen is None:
+            import torch
+            from transformers import AutoProcessor, MusicgenMelodyForConditionalGeneration
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            processor = AutoProcessor.from_pretrained(MUSICGEN_ID)
+            model = MusicgenMelodyForConditionalGeneration.from_pretrained(
+                MUSICGEN_ID, torch_dtype=torch.float16 if device == "cuda" else torch.float32
+            ).to(device)
+            musicgen = (processor, model, device)
+    return musicgen
+
+
+def generate_backing(melody: np.ndarray, melody_sr: int, prompt: str, seconds: float) -> tuple[np.ndarray, int]:
+    import torch
+
+    processor, model, device = get_musicgen()
+    inputs = processor(audio=melody, sampling_rate=melody_sr, text=[prompt], padding=True, return_tensors="pt")
+    inputs = {k: (v.to(device).half() if v.dtype == torch.float32 and device == "cuda" else v.to(device)) for k, v in inputs.items()}
+    frame_rate = model.config.audio_encoder.frame_rate
+    tokens = int(min(30.0, seconds) * frame_rate) + 8
+    with torch.no_grad():
+        audio = model.generate(**inputs, do_sample=True, guidance_scale=3.0, max_new_tokens=tokens)
+    sr = model.config.audio_encoder.sampling_rate
+    return audio[0, 0].float().cpu().numpy(), sr
+
+
 def separate(song: Path, out: Path) -> tuple[Path, Path]:
     """Demucs 로 보컬/반주 분리"""
     subprocess.run(
@@ -139,47 +176,95 @@ def set_step(job_id: str, step: str, progress: float):
 
 
 # ---------------------------------------------------------------- 작업 처리
+def to_voice_ref(job: dict, d: Path) -> Path:
+    """브라우저 녹음(webm/mp4)도 안정적으로 읽히도록 wav 로 변환"""
+    voice_wav = d / "voice_ref.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", job["voice"], "-ac", "1", "-ar", "44100", str(voice_wav)],
+        check=True,
+        capture_output=True,
+    )
+    return voice_wav
+
+
+def write_outputs(d: Path, vocal: np.ndarray, backing: np.ndarray, backing_gain: float = 0.9):
+    n = max(len(backing), len(vocal))
+    mix = np.zeros(n, dtype=np.float32)
+    mix[: len(backing)] += backing * backing_gain
+    mix[: len(vocal)] += vocal
+    peak = float(np.max(np.abs(mix))) or 1.0
+    mix = mix / max(1.0, peak / 0.98)
+    sf.write(d / "vocals.wav", vocal, SR)
+    sf.write(d / "mix.wav", mix, SR)
+    for src, dst in (("mix.wav", "mix.mp3"), ("vocals.wav", "vocals.mp3")):
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(d / src), "-b:a", "192k", str(d / dst)],
+            check=True,
+        )
+
+
+def run_practice(job_id: str):
+    from melody import make_melody, render_melody
+
+    job = jobs[job_id]
+    d = Path(job["dir"])
+    set_step(job_id, "새 멜로디 만들기", 0.05)
+    notes, total, tonic = make_melody(job["bpm"], job["minor"], job["low"], job["seed"])
+    (d / "notes.json").write_text(json.dumps({"notes": notes, "duration": total, "bpm": job["bpm"], "tonic": tonic}))
+    melody32 = render_melody(notes, total, 32000)
+    melody44 = render_melody(notes, total, SR)
+    sf.write(d / "melody.wav", melody44, SR)
+
+    set_step(job_id, "반주 만들기", 0.15)
+    backing, bsr = generate_backing(melody32, 32000, job["prompt"], total)
+    backing = librosa.resample(backing, orig_sr=bsr, target_sr=SR).astype(np.float32)
+    backing = backing / max(1e-6, float(np.max(np.abs(backing)))) * 0.6
+    # 반주가 멜로디보다 짧으면 페이드아웃, 길면 자르기
+    want = int(total * SR)
+    if len(backing) > want:
+        backing = backing[:want]
+    fade = min(len(backing), int(0.8 * SR))
+    backing[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
+
+    if job.get("voice"):
+        set_step(job_id, "내 목소리로 가이드 만들기", 0.6)
+        vocal = convert(d / "melody.wav", to_voice_ref(job, d), 0, job["steps"])
+        vpeak = float(np.max(np.abs(vocal))) or 1.0
+        vocal = vocal / vpeak * 0.7
+    else:
+        vocal = melody44 * 2.2
+
+    set_step(job_id, "합치기", 0.92)
+    write_outputs(d, vocal.astype(np.float32), backing, backing_gain=0.85)
+
+
 def run_job(job_id: str):
     job = jobs[job_id]
     d = Path(job["dir"])
     try:
+        if job.get("kind") == "practice":
+            job["status"] = "running"
+            run_practice(job_id)
+            job.update(status="done", step="완료", progress=1.0)
+            return
         job["status"] = "running"
         set_step(job_id, "보컬과 반주 분리", 0.1)
         vocals, inst = separate(Path(job["song"]), d / "sep")
 
         set_step(job_id, "내 목소리로 변환", 0.4)
-        # 브라우저 녹음(webm/mp4)도 안정적으로 읽히도록 wav 로 변환
-        voice_wav = d / "voice_ref.wav"
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", job["voice"], "-ac", "1", "-ar", "44100", str(voice_wav)],
-            check=True,
-            capture_output=True,
-        )
-        ai_vocal = convert(vocals, voice_wav, job["key"], job["steps"])
+        ai_vocal = convert(vocals, to_voice_ref(job, d), job["key"], job["steps"])
 
         set_step(job_id, "반주와 합치기", 0.85)
         acc, _ = librosa.load(str(inst), sr=SR, mono=True)
         if job["key"]:
             acc = librosa.effects.pitch_shift(acc, sr=SR, n_steps=job["key"])
-        n = max(len(acc), len(ai_vocal))
-        mix = np.zeros(n, dtype=np.float32)
-        mix[: len(acc)] += acc * 0.9
-        mix[: len(ai_vocal)] += ai_vocal
-        peak = float(np.max(np.abs(mix))) or 1.0
-        mix = mix / max(1.0, peak / 0.98)
-
-        sf.write(d / "vocals.wav", ai_vocal, SR)
-        sf.write(d / "mix.wav", mix, SR)
-        for src, dst in (("mix.wav", "mix.mp3"), ("vocals.wav", "vocals.mp3")):
-            subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error", "-i", str(d / src), "-b:a", "192k", str(d / dst)],
-                check=True,
-            )
+        write_outputs(d, ai_vocal, acc.astype(np.float32))
         job.update(status="done", step="완료", progress=1.0)
     except subprocess.CalledProcessError as e:
         job.update(status="error", error="음원 처리 중 오류가 났어요.", detail=(e.stderr or b"")[-2000:].decode(errors="ignore"))
     except Exception as e:  # noqa: BLE001
-        job.update(status="error", error="AI 커버를 만들지 못했어요.", detail="".join(traceback.format_exception(e))[-2000:])
+        what = "연습곡을" if job.get("kind") == "practice" else "AI 커버를"
+        job.update(status="error", error=f"{what} 만들지 못했어요.", detail="".join(traceback.format_exception(e))[-2000:])
 
 
 def worker():
@@ -209,7 +294,9 @@ def startup():
     def warm():
         try:
             get_model()
-            print("[ttarasori] 모델 준비 완료", flush=True)
+            print("[ttarasori] 음성 변환 모델 준비 완료", flush=True)
+            get_musicgen()
+            print("[ttarasori] 반주 생성 모델 준비 완료", flush=True)
         except Exception:  # noqa: BLE001
             traceback.print_exc()
 
@@ -223,6 +310,7 @@ def health():
     return {
         "ok": True,
         "model_loaded": vc_model is not None,
+        "practice_ready": musicgen is not None,
         "queue": queue.qsize(),
         "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
     }
@@ -312,3 +400,51 @@ def job_vocals(job_id: str, request: Request):
 @app.get("/jobs/{job_id}/vocals.wav")
 def job_vocals_wav(job_id: str, request: Request):
     return job_file(job_id, request, "vocals.wav", "audio/wav")
+
+
+@app.post("/practice")
+async def create_practice(
+    request: Request,
+    prompt: str = Form(...),
+    bpm: int = Form(80),
+    minor: bool = Form(False),
+    low: bool = Form(False),
+    seed: int = Form(0),
+    voice: UploadFile | None = File(None),
+):
+    """원곡 '느낌'(텍스트 설명)만으로 새 연습곡 만들기. 원곡 음원은 받지 않아요."""
+    verify(token_from(request))
+    if not 50 <= bpm <= 160:
+        raise HTTPException(400, "빠르기는 50~160 BPM 사이로 정해 주세요.")
+    prompt = prompt.strip()[:300]
+    if not prompt:
+        raise HTTPException(400, "스타일 설명이 비어 있어요.")
+    job_id = uuid.uuid4().hex[:12]
+    d = WORK_DIR / job_id
+    d.mkdir()
+    voice_path = None
+    if voice is not None and voice.filename:
+        voice_path = d / f"voice{Path(voice.filename).suffix or '.webm'}"
+        await save_upload(voice, voice_path)
+    jobs[job_id] = {
+        "kind": "practice",
+        "status": "queued",
+        "step": "대기 중",
+        "progress": 0.0,
+        "dir": str(d),
+        "voice": str(voice_path) if voice_path else None,
+        "prompt": prompt,
+        "bpm": bpm,
+        "minor": minor,
+        "low": low,
+        "seed": seed,
+        "steps": 30,
+        "created": time.time(),
+    }
+    queue.put(job_id)
+    return {"id": job_id, "position": queue.qsize()}
+
+
+@app.get("/jobs/{job_id}/notes")
+def job_notes(job_id: str, request: Request):
+    return job_file(job_id, request, "notes.json", "application/json")

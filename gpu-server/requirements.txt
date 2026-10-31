@@ -16,3 +16,4 @@ pydub==0.25.1
 pyyaml
 matplotlib
 accelerate
+sentencepiece

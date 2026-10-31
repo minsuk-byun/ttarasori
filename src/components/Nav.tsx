@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const LINKS = [
   { href: "/cover", label: "AI 커버 만들기" },
+  { href: "/practice", label: "연습곡 만들기" },
   { href: "/compare", label: "내 노래 비교" },
 ];
 
@@ -17,12 +18,12 @@ export default function Nav() {
           <Logo />
           따라소리
         </Link>
-        <div className="ml-auto flex gap-1 text-[15px]">
+        <div className="ml-auto flex gap-1 overflow-x-auto text-[15px] [scrollbar-width:none]">
           {LINKS.map((l) => (
             <Link
               key={l.href}
               href={l.href}
-              className={`rounded-lg px-3 py-1.5 transition-colors ${
+              className={`shrink-0 rounded-lg px-3 py-1.5 transition-colors ${
                 path === l.href ? "bg-ink text-white" : "text-muted hover:bg-key hover:text-ink"
               }`}
             >
