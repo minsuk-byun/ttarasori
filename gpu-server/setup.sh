@@ -26,6 +26,7 @@ start_tunnel() {
   fi
   pkill -f "cloudflared tunnel" 2>/dev/null || true
   rm -f /root/tunnel-url.txt
+  date +%s > /root/server-started-at
   nohup /root/cloudflared tunnel --no-autoupdate --url http://localhost:8000 > /root/cloudflared.log 2>&1 &
   (
     url=""

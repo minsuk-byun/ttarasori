@@ -16,10 +16,22 @@ if not secret:
     sys.exit(0)
 
 ts = int(time.time())
-sig = base64.urlsafe_b64encode(hmac.new(secret.encode(), f"{url}|{ts}".encode(), hashlib.sha256).digest()).decode().rstrip("=")
+# 서버가 처음 켜진 시각: 더 늦게 켜진(새) 서버의 주소만 받아들이게 하는 데 써요
+started_file = "/root/server-started-at"
+try:
+    started = int(open(started_file).read().strip())
+except Exception:  # noqa: BLE001
+    started = ts
+    try:
+        open(started_file, "w").write(str(started))
+    except Exception:  # noqa: BLE001
+        pass
+sig = base64.urlsafe_b64encode(
+    hmac.new(secret.encode(), f"{url}|{ts}|{started}".encode(), hashlib.sha256).digest()
+).decode().rstrip("=")
 req = urllib.request.Request(
     endpoint,
-    data=json.dumps({"url": url, "ts": ts, "sig": sig}).encode(),
+    data=json.dumps({"url": url, "ts": ts, "started": started, "sig": sig}).encode(),
     headers={"Content-Type": "application/json", "User-Agent": "ttarasori-gpu"},
     method="POST",
 )
