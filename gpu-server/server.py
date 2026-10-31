@@ -139,9 +139,8 @@ def get_musicgen():
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             processor = AutoProcessor.from_pretrained(MUSICGEN_ID)
-            model = MusicgenMelodyForConditionalGeneration.from_pretrained(
-                MUSICGEN_ID, torch_dtype=torch.float16 if device == "cuda" else torch.float32
-            ).to(device)
+            # fp16 에서는 무음/NaN 이 나오는 경우가 있어 fp32 로 실행 (RTX 3090 24GB 에 충분)
+            model = MusicgenMelodyForConditionalGeneration.from_pretrained(MUSICGEN_ID, torch_dtype=torch.float32).to(device)
             musicgen = (processor, model, device)
     return musicgen
 
@@ -151,13 +150,18 @@ def generate_backing(melody: np.ndarray, melody_sr: int, prompt: str, seconds: f
 
     processor, model, device = get_musicgen()
     inputs = processor(audio=melody, sampling_rate=melody_sr, text=[prompt], padding=True, return_tensors="pt")
-    inputs = {k: (v.to(device).half() if v.dtype == torch.float32 and device == "cuda" else v.to(device)) for k, v in inputs.items()}
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     frame_rate = model.config.audio_encoder.frame_rate
     tokens = int(min(30.0, seconds) * frame_rate) + 8
     with torch.no_grad():
         audio = model.generate(**inputs, do_sample=True, guidance_scale=3.0, max_new_tokens=tokens)
     sr = model.config.audio_encoder.sampling_rate
-    return audio[0, 0].float().cpu().numpy(), sr
+    out = audio[0, 0].float().cpu().numpy()
+    rms = float(np.sqrt(np.mean(np.square(np.nan_to_num(out)))))
+    print(f"[ttarasori] backing len={len(out) / sr:.1f}s rms={rms:.4f} nan={int(np.isnan(out).sum())}", flush=True)
+    if not np.isfinite(out).all() or rms < 1e-3:
+        raise RuntimeError(f"반주 생성 결과가 비어 있어요 (rms={rms:.5f})")
+    return out, sr
 
 
 def separate(song: Path, out: Path) -> tuple[Path, Path]:
