@@ -36,7 +36,12 @@ start_tunnel() {
     done
     if [ -z "$url" ]; then log "터널 주소를 만들지 못했어요. /root/cloudflared.log 를 확인해 주세요."; exit 0; fi
     echo "$url" > /root/tunnel-url.txt
-    while true; do log "TUNNEL_URL=$url"; sleep 300; done
+    # 따라소리(Vercel)에 새 주소 자동 등록. 5분마다 다시 등록해서 한 번 실패해도 복구돼요.
+    while true; do
+      log "TUNNEL_URL=$url"
+      log "$(python3 "$HERE/register.py" "$url" 2>&1 | tail -1)"
+      sleep 300
+    done
   ) &
 }
 

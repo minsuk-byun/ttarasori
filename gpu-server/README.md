@@ -31,3 +31,9 @@
 - 서비스가 켜져 있는 동안 GPU 시간이 계속 차감돼요. 안 쓸 때는 VESSL에서 서비스를 멈춰 주세요.
 - 작업 파일은 2시간 뒤 자동 삭제되고, 서버를 다시 시작하면 진행 중이던 작업은 사라져요.
 - Seed-VC는 GPL-3.0 라이선스예요. 정식 서비스로 낼 때는 라이선스 조건을 확인해 주세요.
+
+## 터널 주소 자동 등록
+
+Workspace가 켜지면 Cloudflare 임시 터널 주소(https://○○○.trycloudflare.com)가 생기고, `register.py`가 이 주소를 따라소리의 `/api/gpu/register`에 서명과 함께 등록해요(5분마다 재등록). 따라소리는 Upstash Redis에 저장된 주소를 우선 쓰므로, 재시작해도 Vercel 설정을 바꿀 필요가 없어요.
+
+필요한 것: Vercel 프로젝트에 Upstash Redis 연결(Storage 탭), `SERVICE_SECRET` 환경 변수.
