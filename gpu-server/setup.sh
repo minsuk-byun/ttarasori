@@ -55,6 +55,8 @@ fi
 
 log "파이썬 패키지 설치 중"
 pip install -q --no-cache-dir -r "$HERE/requirements.txt"
+# 가사 노래용 패키지는 따로 설치: 실패해도 서버는 '라'로 부르며 정상 동작
+pip install -q --no-cache-dir pyworld==0.3.4 uroman || log "가사 노래 패키지 설치 실패 (가사 없이 동작)"
 
 if [ ! -d /root/seed-vc ]; then
   log "Seed-VC 내려받는 중"

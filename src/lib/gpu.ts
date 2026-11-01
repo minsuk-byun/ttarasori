@@ -102,6 +102,7 @@ export interface PracticeRequest {
   minor: boolean;
   low: boolean;
   seed: number;
+  lyrics?: string;
   voice?: { blob: Blob; name: string } | null;
 }
 
@@ -113,6 +114,7 @@ export function createPracticeJob(cfg: GpuConfig, req: PracticeRequest, onUpload
     fd.append("minor", String(req.minor));
     fd.append("low", String(req.low));
     fd.append("seed", String(req.seed));
+    if (req.lyrics) fd.append("lyrics", req.lyrics);
     if (req.voice) fd.append("voice", req.voice.blob, req.voice.name.includes(".") ? req.voice.name : `${req.voice.name}.webm`);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${cfg.url}/practice`);
@@ -138,6 +140,8 @@ export interface PracticeNotes {
   duration: number;
   bpm: number;
   tonic: number;
+  lyrics?: boolean;
+  sung?: boolean;
 }
 
 export async function getNotes(cfg: GpuConfig, id: string): Promise<PracticeNotes> {

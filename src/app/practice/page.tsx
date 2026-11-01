@@ -17,6 +17,7 @@ import {
 } from "@/lib/gpu";
 import { savePracticeSong } from "@/lib/practiceLibrary";
 import { getRegisteredVoice, setPendingGuide, setRegisteredVoice, type AudioSource } from "@/lib/store";
+import { LYRICS_MAX, LYRICS_MIN, countSyllables, sampleLyrics } from "@/lib/lyrics";
 import { GENRES, INSTRUMENTS, MOODS, inferStyle, stylePrompt, type Style } from "@/lib/style";
 
 interface Video {
@@ -27,7 +28,7 @@ interface Video {
   style: Style;
 }
 
-const STEPS = ["요청 보내기", "새 멜로디 만들기", "반주 만들기", "가이드 보컬 만들기", "합치기"];
+const STEPS = ["요청 보내기", "새 멜로디 만들기", "가사로 노래 만들기", "반주 만들기", "가이드 보컬 만들기", "합치기"];
 
 type Gen =
   | { kind: "idle" }
@@ -47,10 +48,15 @@ export default function PracticePage() {
   // 2. 스타일
   const [style, setStyle] = useState<Style>(() => inferStyle(""));
   const [low, setLow] = useState(true);
-  // 3. 목소리
+  // 3. 가사
+  const [lyricsOn, setLyricsOn] = useState(true);
+  const [lyrics, setLyrics] = useState(() => sampleLyrics(["calm"]));
+  const [lyricsTouched, setLyricsTouched] = useState(false);
+  const [sampleIdx, setSampleIdx] = useState(0);
+  // 4. 목소리
   const [voice, setVoice] = useState<AudioSource | null>(null);
   const [voiceMode, setVoiceMode] = useState<"guided" | "file" | "none">("guided");
-  // 4. 만들기
+  // 5. 만들기
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 100000));
   const [gen, setGen] = useState<Gen>({ kind: "idle" });
   const alive = useRef(true);
@@ -102,6 +108,13 @@ export default function PracticePage() {
   }
 
   const prompt = useMemo(() => stylePrompt(style), [style]);
+  const moodKey = style.moods.join(",");
+  useEffect(() => {
+    // 직접 고치기 전까지는 분위기에 맞는 예시 가사로 바꿔 줘요
+    if (!lyricsTouched) setLyrics(sampleLyrics(moodKey ? moodKey.split(",") : ["calm"], sampleIdx));
+  }, [moodKey, sampleIdx, lyricsTouched]);
+  const syllableCount = countSyllables(lyrics);
+  const lyricsOk = !lyricsOn || (syllableCount >= LYRICS_MIN && syllableCount <= LYRICS_MAX);
   const live = gpu?.enabled === true;
   const voiceOk = voiceMode === "none" || !!voice;
 
@@ -118,6 +131,7 @@ export default function PracticePage() {
           minor: style.minor,
           low,
           seed: nextSeed,
+          lyrics: lyricsOn ? lyrics : undefined,
           voice: voiceMode !== "none" && voice ? { blob: voice.blob, name: voice.name } : null,
         },
         (p) => setGen({ kind: "running", step: 0, detail: `${Math.round(p * 100)}%` }),
@@ -127,17 +141,33 @@ export default function PracticePage() {
         const s = await getJob(cfg, id);
         if (s.status === "error") throw new Error(s.error ?? "연습곡을 만들지 못했어요.");
         if (s.status === "done") {
-          setGen({ kind: "running", step: 4, detail: "결과 받는 중" });
+          setGen({ kind: "running", step: 5, detail: "결과 받는 중" });
           const mix = await fetchChunked(resultUrl(cfg, id, "mix"), "audio/mpeg");
           const vocals = await fetchChunked(resultUrl(cfg, id, "vocals"), "audio/mpeg").catch(() => null);
           const notes = await getNotes(cfg, id).catch(() => null);
           setGen({ kind: "done", mixUrl: URL.createObjectURL(mix), mix, vocals, notes });
           const genre = GENRES.find((g) => g.id === style.genre)?.label ?? "연습곡";
-          const title = picked ? `${picked.title.slice(0, 40)} 느낌 연습곡` : `${genre} 연습곡 (${style.bpm} BPM)`;
+          const firstLine = lyricsOn ? lyrics.split("\n")[0].trim().slice(0, 20) : "";
+          const title = firstLine
+            ? `「${firstLine}」 ${genre} 연습곡`
+            : picked
+              ? `${picked.title.slice(0, 40)} 느낌 연습곡`
+              : `${genre} 연습곡 (${style.bpm} BPM)`;
           savePracticeSong({ title, mix, vocals });
           return;
         }
-        const step = s.status === "queued" ? 0 : s.step.includes("멜로디") ? 1 : s.step.includes("반주") ? 2 : s.step.includes("가이드") ? 3 : 4;
+        const step =
+          s.status === "queued"
+            ? 0
+            : s.step.includes("멜로디")
+              ? 1
+              : s.step.includes("가사")
+                ? 2
+                : s.step.includes("반주")
+                  ? 3
+                  : s.step.includes("가이드")
+                    ? 4
+                    : 5;
         setGen({
           kind: "running",
           step,
@@ -145,10 +175,12 @@ export default function PracticePage() {
             s.status === "queued"
               ? "앞선 작업을 기다리는 중"
               : step === 2
-                ? "1분 안팎 걸려요"
+                ? "글자마다 발음을 만들고 있어요"
                 : step === 3
-                  ? "곧 끝나요"
-                  : undefined,
+                  ? "1분 안팎 걸려요"
+                  : step === 4
+                    ? "곧 끝나요"
+                    : undefined,
         });
       }
     } catch (e) {
@@ -341,7 +373,47 @@ export default function PracticePage() {
           <p className="mt-3 text-xs leading-relaxed text-muted">AI에 전달되는 설명: {prompt}</p>
         </Step>
 
-        <Step n={3} title="가이드를 부를 목소리" done={voiceOk}>
+        <Step n={3} title="가사" done={lyricsOn && lyricsOk}>
+          <label className="-mt-2 mb-3 flex items-center gap-2 text-sm">
+            <input type="checkbox" className="accent-guide" checked={lyricsOn} onChange={(e) => setLyricsOn(e.target.checked)} />
+            AI가 가사를 붙여서 불러요
+          </label>
+          {lyricsOn && (
+            <>
+              <textarea
+                value={lyrics}
+                onChange={(e) => {
+                  setLyrics(e.target.value);
+                  setLyricsTouched(true);
+                }}
+                rows={4}
+                className="w-full resize-y rounded-xl border border-line bg-surface px-4 py-3 text-[17px] leading-relaxed outline-none focus:border-ink"
+                aria-label="연습곡 가사"
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+                <span className={syllableCount < LYRICS_MIN || syllableCount > LYRICS_MAX ? "text-bad" : "text-muted"}>
+                  {syllableCount}글자 (한글 {LYRICS_MIN}~{LYRICS_MAX}글자, 한 글자에 음 하나)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLyricsTouched(false);
+                    setSampleIdx((i) => i + 1);
+                  }}
+                  className="ml-auto rounded-lg px-3 py-1.5 font-semibold text-guide hover:bg-guide-soft"
+                >
+                  다른 예시 가사
+                </button>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-muted">
+                예시 가사는 따라소리가 새로 쓴 가사예요. 원곡 가사는 저작권이 있어서 넣지 말아 주세요. 글자 수가 음표 수와 다르면 멜로디를 자동으로
+                맞춰요.
+              </p>
+            </>
+          )}
+        </Step>
+
+        <Step n={4} title="가이드를 부를 목소리" done={voiceOk}>
           {voice && voiceMode !== "none" ? (
             <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-4">
               <span className="grid h-10 w-10 place-items-center rounded-full bg-mine text-sm font-bold text-white" aria-hidden>
@@ -396,10 +468,10 @@ export default function PracticePage() {
           </label>
         </Step>
 
-        <Step n={4} title="연습곡 만들기" disabled={!voiceOk}>
+        <Step n={5} title="연습곡 만들기" disabled={!voiceOk || !lyricsOk}>
           {gen.kind !== "done" && (
             <button
-              disabled={!voiceOk || running || !live}
+              disabled={!voiceOk || !lyricsOk || running || !live}
               onClick={() => make()}
               className="rounded-xl bg-guide px-6 py-3 font-semibold text-white disabled:opacity-35"
             >
@@ -437,6 +509,9 @@ export default function PracticePage() {
                 onTimeUpdate={(e) => setHead(e.currentTarget.currentTime)}
                 onPause={() => setHead(null)}
               />
+              {gen.notes?.lyrics && (
+                <Karaoke notes={gen.notes} audio={audioRef} sung={!!gen.notes.sung} />
+              )}
               {roll && (
                 <div className="mt-4 rounded-xl bg-surface p-3 text-ink">
                   <div className="mb-1 text-sm font-semibold">따라 부를 멜로디</div>
@@ -528,6 +603,49 @@ function Toggle({ label, options }: { label: string; options: [string, boolean, 
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** 재생 위치에 맞춰 가사를 한 글자씩 강조 (노래방처럼) */
+function Karaoke({ notes, audio, sung }: { notes: PracticeNotes; audio: React.RefObject<HTMLAudioElement | null>; sung: boolean }) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      if (audio.current) setT(audio.current.currentTime);
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [audio]);
+
+  // 쉼(0.3초 이상 비는 곳)마다 줄을 나눠요
+  const lines: PracticeNotes["notes"][] = [];
+  notes.notes.forEach((n, i) => {
+    const prev = notes.notes[i - 1];
+    if (!prev || n.start - (prev.start + prev.dur) > 0.3 || (lines[lines.length - 1]?.length ?? 0) >= 12) lines.push([]);
+    lines[lines.length - 1].push(n);
+  });
+  const cur = lines.findIndex((l) => t < l[l.length - 1].start + l[l.length - 1].dur);
+  const show = cur < 0 ? lines.slice(-2) : lines.slice(cur, cur + 2);
+
+  return (
+    <div className="mt-4 rounded-xl bg-white/5 px-4 py-4" aria-label="가사">
+      {show.map((line, li) => (
+        <p key={li} className={`flex flex-wrap gap-x-0.5 ${li === 0 ? "text-2xl font-bold" : "mt-1 text-lg text-white/45"}`}>
+          {line.map((n, k) => {
+            const done = t >= n.start + n.dur;
+            const now = t >= n.start && !done;
+            return (
+              <span key={k} className={li === 0 ? (now ? "text-[#ff9bbf]" : done ? "text-white" : "text-white/45") : undefined}>
+                {n.syllable}
+              </span>
+            );
+          })}
+        </p>
+      ))}
+      {!sung && <p className="mt-2 text-xs text-white/50">이번에는 가사 발음을 만들지 못해 &quot;라&quot;로 불렀어요. 가사를 보며 직접 붙여 불러 보세요.</p>}
     </div>
   );
 }

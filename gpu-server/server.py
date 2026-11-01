@@ -212,12 +212,35 @@ def run_practice(job_id: str):
 
     job = jobs[job_id]
     d = Path(job["dir"])
+    import sing
+
     set_step(job_id, "새 멜로디 만들기", 0.05)
     notes, total, tonic = make_melody(job["bpm"], job["minor"], job["low"], job["seed"])
-    (d / "notes.json").write_text(json.dumps({"notes": notes, "duration": total, "bpm": job["bpm"], "tonic": tonic}))
+    syls = sing.syllables(job.get("lyrics") or "")
+    if syls:
+        notes = sing.fit_notes(notes, len(syls))
+        for nt, sy in zip(notes, syls):
+            nt["syllable"] = sy
     melody32 = render_melody(notes, total, 32000)
     melody44 = render_melody(notes, total, SR)
-    sf.write(d / "melody.wav", melody44, SR)
+
+    # 가사가 있으면 글자마다 발음을 만들어 노래로 이어 붙이기 (실패하면 '라'로 부른 멜로디 사용)
+    sung = False
+    guide_src = melody44
+    if syls:
+        set_step(job_id, "가사로 노래 만들기", 0.1)
+        try:
+            guide_src = sing.sing(notes, total, SR)
+            sung = True
+        except Exception:  # noqa: BLE001
+            print("[ttarasori] 가사 노래 실패:\n" + traceback.format_exc()[-1500:], flush=True)
+    sf.write(d / "melody.wav", guide_src, SR)
+    (d / "notes.json").write_text(
+        json.dumps(
+            {"notes": notes, "duration": total, "bpm": job["bpm"], "tonic": tonic, "lyrics": bool(syls), "sung": sung},
+            ensure_ascii=False,
+        )
+    )
 
     set_step(job_id, "반주 만들기", 0.15)
     backing, bsr = generate_backing(melody32, 32000, job["prompt"], total)
@@ -236,7 +259,7 @@ def run_practice(job_id: str):
         vpeak = float(np.max(np.abs(vocal))) or 1.0
         vocal = vocal / vpeak * 0.7
     else:
-        vocal = melody44 * 2.2
+        vocal = guide_src if sung else melody44 * 2.2
 
     set_step(job_id, "합치기", 0.92)
     # 가이드 보컬이 반주를 덮지 않게 음량 맞추기 (보컬 RMS ≈ 반주 RMS × 1.4)
@@ -305,6 +328,13 @@ def startup():
             print("[ttarasori] 음성 변환 모델 준비 완료", flush=True)
             get_musicgen()
             print("[ttarasori] 반주 생성 모델 준비 완료", flush=True)
+            import sing
+
+            if sing.ready():
+                sing.warm()
+                print("[ttarasori] 가사 노래 모델 준비 완료", flush=True)
+            else:
+                print("[ttarasori] 가사 노래 패키지(pyworld)가 없어 '라'로만 불러요", flush=True)
         except Exception:  # noqa: BLE001
             traceback.print_exc()
 
@@ -312,6 +342,15 @@ def startup():
 
 
 # ---------------------------------------------------------------- API
+def _lyrics_ready() -> bool:
+    try:
+        import sing
+
+        return sing.ready() and sing._tts is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @app.get("/health")
 def health():
     tunnel = Path("/root/tunnel-url.txt")
@@ -319,6 +358,7 @@ def health():
         "ok": True,
         "model_loaded": vc_model is not None,
         "practice_ready": musicgen is not None,
+        "lyrics_ready": _lyrics_ready(),
         "queue": queue.qsize(),
         "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
     }
@@ -418,6 +458,7 @@ async def create_practice(
     minor: bool = Form(False),
     low: bool = Form(False),
     seed: int = Form(0),
+    lyrics: str = Form(""),
     voice: UploadFile | None = File(None),
 ):
     """원곡 '느낌'(텍스트 설명)만으로 새 연습곡 만들기. 원곡 음원은 받지 않아요."""
@@ -446,6 +487,7 @@ async def create_practice(
         "minor": minor,
         "low": low,
         "seed": seed,
+        "lyrics": lyrics[:400],
         "steps": 30,
         "created": time.time(),
     }
