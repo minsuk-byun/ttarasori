@@ -51,6 +51,8 @@ SR = 44100
 
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(SEED_VC_DIR))
+# 이 폴더를 절대 경로로 맨 앞에: Seed-VC 가 작업 폴더를 잠깐 바꾸는 동안 다른 스레드의 import sing2 가 실패했어요
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 app = FastAPI(title="ttarasori-gpu")
 app.add_middleware(
