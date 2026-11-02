@@ -31,11 +31,22 @@ start_tunnel() {
   [ "${ENABLE_TUNNEL:-1}" = "1" ] || return 0
   if [ ! -x /root/cloudflared ]; then
     log "cloudflared 내려받는 중"
-    if ! download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared; then
-      log "cloudflared 를 내려받지 못했어요. 터널 없이 서버만 켜요 (VPN 안에서만 접속 가능)"
-      return 0
+    log "GitHub 응답: $(curl -sS -o /dev/null -w '%{http_code} %{url_effective}' -L --max-time 20 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 2>&1 | tail -c 200)"
+    if download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared; then
+      chmod +x /root/cloudflared
+    else
+      # 두 번째 방법: Cloudflare 공식 패키지 저장소 (GitHub 가 막히거나 느릴 때)
+      log "GitHub 에서 못 받아서 Cloudflare 패키지 저장소로 설치해요"
+      mkdir -p --mode=0755 /usr/share/keyrings
+      if download https://pkg.cloudflare.com/cloudflare-main.gpg /usr/share/keyrings/cloudflare-main.gpg &&
+        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" > /etc/apt/sources.list.d/cloudflared.list &&
+        timeout 300 apt-get update -qq && timeout 300 apt-get install -y -qq cloudflared >/dev/null; then
+        ln -sf "$(command -v cloudflared)" /root/cloudflared
+      else
+        log "cloudflared 를 설치하지 못했어요. 터널 없이 서버만 켜요 (VPN 안에서만 접속 가능)"
+        return 0
+      fi
     fi
-    chmod +x /root/cloudflared
   fi
   pkill -f "cloudflared tunnel" 2>/dev/null || true
   rm -f /root/tunnel-url.txt
