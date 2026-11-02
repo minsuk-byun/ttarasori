@@ -31,8 +31,12 @@ start_tunnel() {
   [ "${ENABLE_TUNNEL:-1}" = "1" ] || return 0
   if [ ! -x /root/cloudflared ]; then
     log "cloudflared 내려받는 중"
-    log "GitHub 응답: $(curl -sS -o /dev/null -w '%{http_code} %{url_effective}' -L --max-time 20 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 2>&1 | tail -c 200)"
-    if download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared; then
+    # 1순위: 우리 저장소 tools 브랜치 (git clone 은 학교망에서도 잘 돼요. 릴리스 다운로드 서버는 자주 막혀요)
+    if timeout 180 git clone -q --depth 1 -b tools https://github.com/minsuk-byun/ttarasori /tmp/ttarasori-tools 2>/dev/null &&
+      cp /tmp/ttarasori-tools/cloudflared-linux-amd64 /root/cloudflared; then
+      chmod +x /root/cloudflared
+      log "cloudflared 준비 완료 (저장소 tools 브랜치)"
+    elif download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared; then
       chmod +x /root/cloudflared
     else
       # 두 번째 방법: Cloudflare 공식 패키지 저장소 (GitHub 가 막히거나 느릴 때)
@@ -40,7 +44,7 @@ start_tunnel() {
       mkdir -p --mode=0755 /usr/share/keyrings
       if download https://pkg.cloudflare.com/cloudflare-main.gpg /usr/share/keyrings/cloudflare-main.gpg &&
         echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" > /etc/apt/sources.list.d/cloudflared.list &&
-        timeout 300 apt-get update -qq && timeout 300 apt-get install -y -qq cloudflared >/dev/null; then
+        timeout 120 apt-get update -qq -o Dir::Etc::sourcelist=sources.list.d/cloudflared.list -o Dir::Etc::sourceparts=- && timeout 120 apt-get install -y -qq cloudflared >/dev/null; then
         ln -sf "$(command -v cloudflared)" /root/cloudflared
       else
         log "cloudflared 를 설치하지 못했어요. 터널 없이 서버만 켜요 (VPN 안에서만 접속 가능)"
