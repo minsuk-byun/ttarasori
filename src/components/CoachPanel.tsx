@@ -63,7 +63,7 @@ export default function CoachPanel({ coach, notes, hasLyrics, player, guideBlob,
       if (useLyrics) expected = lyricSyls.map((n) => ({ s: n.syllable, t0: n.start, t1: n.start + n.dur }));
       else expected = sylsFromTranscript(res.guide);
       if (expected.length < 4) throw new Error("가이드에서 가사를 충분히 알아듣지 못했어요. 가사가 있는 연습곡으로 해 보세요.");
-      const heard = hangulOnly(res.mine.text);
+      const heard = hangulOnly(dedupeWords(res.mine.text));
       const syl = alignSyllables(
         expected.map((e) => e.s),
         heard,
@@ -291,7 +291,7 @@ function sylsFromTranscript(t?: Transcript): { s: string; t0: number; t1: number
   if (!t) return [];
   const out: { s: string; t0: number; t1: number }[] = [];
   for (const ch of t.chunks) {
-    const syls = hangulOnly(ch.text);
+    const syls = hangulOnly(dedupeWords(ch.text));
     if (!syls.length) continue;
     const a = ch.start ?? (out.length ? out[out.length - 1].t1 : 0);
     const b = ch.end ?? a + syls.length * 0.3;
@@ -300,4 +300,18 @@ function sylsFromTranscript(t?: Transcript): { s: string; t0: number; t1: number
   }
   if (!out.length) hangulOnly(t.text).forEach((s, i) => out.push({ s, t0: i * 0.3, t1: (i + 1) * 0.3 }));
   return out;
+}
+
+/** 음성 인식이 같은 말을 끝없이 반복하는 오류 걸러내기 (3번 넘게 연달아 나오면 1번만) */
+function dedupeWords(text: string): string {
+  const out: string[] = [];
+  let run = 0;
+  for (const w of text.split(/\s+/)) {
+    const k = w.replace(/[.,!?~]/g, "");
+    if (out.length && k && k === out[out.length - 1].replace(/[.,!?~]/g, "")) {
+      if (++run >= 2) continue;
+    } else run = 0;
+    out.push(w);
+  }
+  return out.join(" ");
 }
