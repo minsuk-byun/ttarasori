@@ -92,7 +92,9 @@ function Picker({ onPick }: { onPick: (v: Video) => void }) {
   return (
     <section className="mt-8 max-w-3xl rounded-2xl bg-surface p-5 sm:p-6">
       <h2 className="text-xl font-semibold">원곡 고르기</h2>
-      <p className="mt-1 text-sm text-muted">곡 이름으로 검색하거나, 유튜브 영상 주소를 그대로 붙여 넣어도 돼요. 가수 공식 채널 영상을 고르면 좋아요.</p>
+      <p className="mt-1 text-sm text-muted">
+        곡 이름으로 검색하거나, 유튜브 영상 주소를 그대로 붙여 넣어도 돼요. 가수 공식 채널의 가사(Lyric) 영상이나 가사 자막이 있는 영상을 고르면 따라 부르기 편해요.
+      </p>
       <form onSubmit={submit} className="mt-4 flex gap-2">
         <input
           value={q}
@@ -146,6 +148,7 @@ interface Take {
 function Studio({ video, onChange }: { video: Video; onChange: () => void }) {
   const yt = useYouTube(video.id);
   const [rate, setRate] = useState(1);
+  const [captions, setCaptions] = useState(true);
   const [a, setA] = useState<number | null>(null);
   const [b, setB] = useState<number | null>(null);
   const [loop, setLoop] = useState(false);
@@ -302,6 +305,25 @@ function Studio({ video, onChange }: { video: Video; onChange: () => void }) {
                 {fmt(yt.time)} / {fmt(yt.duration)}
               </span>
             </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted">가사 자막</span>
+              {[true, false].map((on) => (
+                <button
+                  key={String(on)}
+                  onClick={() => {
+                    setCaptions(on);
+                    yt.setCaptions(on);
+                  }}
+                  disabled={!yt.ready}
+                  className={`rounded-md px-2.5 py-1 text-sm font-semibold ${captions === on ? "bg-ink text-white" : "text-muted hover:text-ink"}`}
+                >
+                  {on ? "켜기" : "끄기"}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-muted">
+              영상에 올라온 가사 자막을 유튜브 플레이어가 보여 줘요. 자막이 없는 영상이면 안 나와요. 검색할 때 &lsquo;가사&rsquo;나 &lsquo;lyrics&rsquo;를 붙이면 가사가 나오는 공식 영상을 찾기 쉬워요.
+            </p>
           </div>
 
           <div>

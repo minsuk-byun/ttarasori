@@ -15,6 +15,9 @@ export interface YTPlayer {
   setPlaybackRate(rate: number): void;
   getPlayerState(): number;
   destroy(): void;
+  loadModule?(name: string): void;
+  unloadModule?(name: string): void;
+  setOption?(module: string, option: string, value: unknown): void;
 }
 
 interface YTNamespace {
@@ -91,7 +94,8 @@ export function useYouTube(videoId: string | null) {
         host: "https://www.youtube-nocookie.com",
         width: "100%",
         height: "100%",
-        playerVars: { rel: 0, playsinline: 1, modestbranding: 1 },
+        // 자막(가사): 영상에 올라온 한국어 자막이 있으면 처음부터 켜요. 가사는 유튜브 플레이어가 직접 보여 주고, 따라소리는 가사를 저장하지 않아요.
+        playerVars: { rel: 0, playsinline: 1, modestbranding: 1, cc_load_policy: 1, cc_lang_pref: "ko", hl: "ko" },
         events: {
           onReady: () => {
             if (!alive) return;
@@ -120,5 +124,19 @@ export function useYouTube(videoId: string | null) {
     };
   }, [videoId]);
 
-  return { mount, player, ready, playing, time, duration };
+  /** 유튜브 자막 켜기/끄기 (영상에 자막이 없으면 아무 변화가 없어요) */
+  const setCaptions = (on: boolean) => {
+    const p = player.current;
+    if (!p) return;
+    try {
+      if (on) {
+        p.loadModule?.("captions");
+        p.setOption?.("captions", "track", { languageCode: "ko" });
+      } else p.unloadModule?.("captions");
+    } catch {
+      /* 무시 */
+    }
+  };
+
+  return { mount, player, ready, playing, time, duration, setCaptions };
 }
