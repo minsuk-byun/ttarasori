@@ -295,6 +295,7 @@ def clarity(y: np.ndarray, sr: int, orig: list[str], pron: list[str]) -> float |
 
 
 LINE_GOOD = 0.75
+RETRY_BUDGET = float(os.environ.get("SING_RETRY_BUDGET", "75"))  # 초
 
 
 def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str]], line_texts: list[str]) -> tuple[np.ndarray, dict]:
@@ -369,6 +370,9 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
         for li in range(len(groups)):
             for m in methods:
                 if scores[li] >= LINE_GOOD:
+                    break
+                if time.time() - t0 > RETRY_BUDGET:  # 너무 오래 걸리지 않게: 시간 예산을 넘으면 그만
+                    print("[ttarasori] 가사 다시 부르기: 시간 예산 초과로 멈춤", flush=True)
                     break
                 if m == choice[li] or line_audio(m, li) is None:
                     continue
