@@ -6,7 +6,7 @@ import LibraryPicker from "@/components/LibraryPicker";
 import { DeviationChart, PianoRoll, scoreColor } from "@/components/Charts";
 import NoteFeedback from "@/components/NoteFeedback";
 import RepeatPractice from "@/components/RepeatPractice";
-import TunedVersion from "@/components/TunedVersion";
+import TunedVersion, { tuneTarget } from "@/components/TunedVersion";
 import { compareFeatures, fmtTime, type Comparison, type Issue, type Segment } from "@/lib/audio/compare.ts";
 import { decodeToMono } from "@/lib/audio/decode.ts";
 import { extractFeatures, type Features } from "@/lib/audio/features.ts";
@@ -102,6 +102,13 @@ export default function ComparePage() {
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">내 노래 비교 분석</h1>
         <p className="mt-3 text-[17px] leading-relaxed text-muted">
           AI가 내 목소리로 부른 커버와 직접 부른 노래를 겹쳐 보고, 음정·박자·강약이 달라지는 구간과 연습 방법을 알려 드려요.
+        </p>
+        <p className="mt-2 text-sm text-muted">
+          원곡을 들으며 바로 불러 보고 싶다면{" "}
+          <a href="/original" className="font-semibold text-guide underline-offset-2 hover:underline">
+            원곡 따라 부르기
+          </a>
+          를 써 보세요.
         </p>
       </div>
 
@@ -232,7 +239,7 @@ function Results({ analysis, guide, mine, backing }: { analysis: Analysis; guide
         </ul>
       </section>
 
-      <TunedVersion result={result} mine={mine.blob} onReady={setTuned} />
+      <TunedVersion makeTarget={() => tuneTarget(result)} resetKey={result} mine={mine.blob} onReady={setTuned} />
 
       {/* 음정 곡선 */}
       <section className="rounded-2xl bg-surface p-4 sm:p-6">

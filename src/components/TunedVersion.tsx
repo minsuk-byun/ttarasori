@@ -39,7 +39,18 @@ type State =
   | { kind: "done"; url: string; before: number; after: number }
   | { kind: "error"; msg: string };
 
-export default function TunedVersion({ result, mine, onReady }: { result: Comparison; mine: Blob; onReady: (b: Blob | null) => void }) {
+interface Props {
+  /** 내 녹음 시간축 기준 목표 음 만들기 */
+  makeTarget: () => { hop: number; midi: (number | null)[] };
+  mine: Blob;
+  onReady: (b: Blob | null) => void;
+  /** 이 값이 바뀌면 처음 상태로 */
+  resetKey: unknown;
+  /** 설명 문구 (기본: AI 커버에 맞추기) */
+  description?: React.ReactNode;
+}
+
+export default function TunedVersion({ makeTarget, mine, onReady, resetKey, description }: Props) {
   const [gpu, setGpu] = useState<boolean | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
   const alive = useRef(true);
@@ -60,14 +71,14 @@ export default function TunedVersion({ result, mine, onReady }: { result: Compar
     });
     onReady(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, mine]);
+  }, [resetKey, mine]);
 
   async function make() {
     try {
       setState({ kind: "working", step: "GPU 서버 연결 중", p: 0.02 });
       const cfg = await getGpuConfig();
       if (!cfg.enabled) throw new Error("GPU 서버가 꺼져 있어서 지금은 만들 수 없어요.");
-      const id = await createTuneJob(cfg, mine, tuneTarget(result), (p) =>
+      const id = await createTuneJob(cfg, mine, makeTarget(), (p) =>
         setState({ kind: "working", step: "내 녹음 올리는 중", p: 0.02 + p * 0.18 }),
       );
       for (;;) {
@@ -101,8 +112,12 @@ export default function TunedVersion({ result, mine, onReady }: { result: Compar
         <div className="max-w-2xl flex-1">
           <h2 className="text-xl font-semibold">내 목소리 교정본</h2>
           <p className="mt-1 text-[15px] leading-relaxed text-muted">
-            내가 부른 녹음에서 <b className="text-ink">음정만</b> AI 커버에 맞게 고쳐서 내 목소리 그대로 들려드려요. 박자·발음·음색은 그대로라서
-            &ldquo;이렇게 부르면 된다&rdquo;를 내 목소리로 확인할 수 있어요.
+            {description ?? (
+              <>
+                내가 부른 녹음에서 <b className="text-ink">음정만</b> AI 커버에 맞게 고쳐서 내 목소리 그대로 들려드려요. 박자·발음·음색은 그대로라서
+                &ldquo;이렇게 부르면 된다&rdquo;를 내 목소리로 확인할 수 있어요.
+              </>
+            )}
           </p>
         </div>
         {state.kind !== "done" && (

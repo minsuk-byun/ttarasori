@@ -52,7 +52,13 @@ export default function Home() {
       <section className="border-t border-line bg-surface">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <h2 className="text-2xl font-bold tracking-tight">이렇게 써요</h2>
-          <p className="mt-2 text-muted">순서대로 하면 가장 편하지만, 이미 음원이 있으면 아무 단계에서나 시작해도 돼요.</p>
+          <p className="mt-2 text-muted">
+            순서대로 하면 가장 편하지만, 이미 음원이 있으면 아무 단계에서나 시작해도 돼요. 아는 노래를 원곡 그대로 불러 보고 싶다면{" "}
+            <Link href="/original" className="font-semibold text-guide underline-offset-4 hover:underline">
+              원곡 따라 부르기
+            </Link>
+            로 바로 가요.
+          </p>
           <ol className="mt-8 grid gap-8 md:grid-cols-3">
             {STEPS.map((s, i) => (
               <li key={s.title} className="flex flex-col border-t-2 border-ink pt-4">

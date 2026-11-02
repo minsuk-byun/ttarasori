@@ -42,7 +42,9 @@ const median = (a: number[]) => {
 };
 
 /** 가이드 음정 곡선을 음표로 나누기 (가사 정보가 없는 AI 커버용) */
-export function autoNotes(refMidi: (number | null)[], hop: number): NoteInfo[] {
+export function autoNotes(refMidi: (number | null)[], hop: number, opts: { thresh?: number; hold?: number } = {}): NoteInfo[] {
+  const thresh = opts.thresh ?? 0.7; // 이만큼(반음) 벗어나면 다른 음
+  const hold = opts.hold ?? 3; // 이 프레임 수만큼 계속 벗어나야 음이 바뀐 것으로 봄
   const out: NoteInfo[] = [];
   const minLen = Math.max(3, Math.round(0.12 / hop));
   let i = 0;
@@ -65,12 +67,13 @@ export function autoNotes(refMidi: (number | null)[], hop: number): NoteInfo[] {
         break;
       }
       const ref = median(buf.slice(-15));
-      if (Math.abs(v - ref) > 0.7) {
+      if (Math.abs(v - ref) > thresh) {
         off++;
-        if (off >= 3) {
-          flush(j - 2);
-          a = j - 2;
-          buf = refMidi.slice(j - 2, j + 1).filter((x): x is number => x != null);
+        if (off >= hold) {
+          const b = j - hold + 1;
+          flush(b);
+          a = b;
+          buf = refMidi.slice(b, j + 1).filter((x): x is number => x != null);
           off = 0;
           continue;
         }
