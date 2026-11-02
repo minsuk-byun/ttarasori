@@ -34,6 +34,8 @@ export default function CoverPage() {
 
   useEffect(() => {
     getGpuConfig().then(setGpu);
+    // 연습곡 화면에서 "AI 커버 만들기"로 넘어오면 연습곡 고르기 탭을 먼저 보여 줌
+    if (new URLSearchParams(window.location.search).get("from") === "practice") setSongSource("practice");
     return () => {
       alive.current = false;
       if (localUrl.current) URL.revokeObjectURL(localUrl.current);

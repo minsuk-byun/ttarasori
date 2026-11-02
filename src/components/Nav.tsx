@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+// 실제 사용 순서대로: 부를 노래 만들기 → 내 목소리 커버 → 불러 보고 비교
 const LINKS = [
-  { href: "/cover", label: "AI 커버 만들기" },
-  { href: "/practice", label: "연습곡 만들기" },
-  { href: "/compare", label: "내 노래 비교" },
+  { href: "/practice", label: "연습곡 만들기", short: "연습곡" },
+  { href: "/cover", label: "AI 커버 만들기", short: "AI 커버" },
+  { href: "/compare", label: "내 노래 비교", short: "비교·교정" },
 ];
 
 export default function Nav() {
@@ -19,17 +20,30 @@ export default function Nav() {
           따라소리
         </Link>
         <div className="ml-auto flex gap-1 overflow-x-auto text-[15px] [scrollbar-width:none]">
-          {LINKS.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className={`shrink-0 rounded-lg px-3 py-1.5 transition-colors ${
-                path === l.href ? "bg-ink text-white" : "text-muted hover:bg-key hover:text-ink"
-              }`}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {LINKS.map((l, i) => {
+            const on = path === l.href;
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                aria-current={on ? "page" : undefined}
+                className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors sm:px-3 ${
+                  on ? "bg-ink text-white" : "text-muted hover:bg-key hover:text-ink"
+                }`}
+              >
+                <span
+                  className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold ${
+                    on ? "bg-white text-ink" : "bg-key text-muted"
+                  }`}
+                  aria-hidden
+                >
+                  {i + 1}
+                </span>
+                <span className="hidden sm:inline">{l.label}</span>
+                <span className="sm:hidden">{l.short}</span>
+              </Link>
+            );
+          })}
         </div>
       </nav>
     </header>

@@ -520,8 +520,14 @@ export default function PracticePage() {
                 </div>
               )}
               <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => router.push("/cover?from=practice")}
+                  className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-ink hover:bg-white/90"
+                >
+                  다음 단계: 내 목소리로 AI 커버 만들기
+                </button>
                 <button onClick={goCompare} className="rounded-lg bg-mine px-4 py-2.5 text-sm font-semibold hover:brightness-110">
-                  따라 부르고 비교하기
+                  바로 따라 부르고 비교하기
                 </button>
                 <button
                   onClick={() => {
