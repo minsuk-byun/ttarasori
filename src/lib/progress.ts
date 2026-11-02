@@ -6,7 +6,7 @@
  * - phrases:  다시 연습할 구절 모음 (점수가 낮았던 구간, 가이드 조각 음원 포함)
  */
 
-export type SessionKind = "compare" | "repeat" | "drill" | "phrase";
+export type SessionKind = "compare" | "repeat" | "drill" | "phrase" | "game";
 
 export interface Weak {
   flat: number;
@@ -39,6 +39,10 @@ export interface Session {
   /** 내가 낸 음역 (MIDI, 10%/90% 분위) */
   rangeLow?: number;
   rangeHigh?: number;
+  /** 음정 게임 결과 */
+  stars?: number;
+  maxCombo?: number;
+  perfects?: number;
 }
 
 export interface Phrase {
@@ -263,7 +267,7 @@ export interface Profile {
 }
 
 export function profileOf(sessions: Session[]): Profile {
-  const recent = sessions.filter((s) => s.kind === "compare" || s.kind === "drill" || s.kind === "phrase").slice(-12);
+  const recent = sessions.filter((s) => s.kind === "compare" || s.kind === "drill" || s.kind === "phrase" || s.kind === "game").slice(-12);
   const w: Weak = { flat: 0, sharp: 0, late: 0, early: 0, missing: 0, unstable: 0, scoop: 0 };
   for (const s of recent) for (const k of Object.keys(w) as (keyof Weak)[]) w[k] += s.weak?.[k] ?? 0;
   const total = Object.values(w).reduce((a, b) => a + b, 0);

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DrillRunner from "@/components/DrillRunner";
+import GameTab from "@/components/GameTab";
 import PhraseRunner, { type PhraseScore } from "@/components/PhraseRunner";
 import TrendChart from "@/components/TrendChart";
 import { noteName } from "@/components/Charts";
@@ -20,6 +21,7 @@ import {
   type Phrase,
   type Session,
 } from "@/lib/progress";
+import { STAT_LABEL, STAT_TIP, badgesOf, levelOf, missionsOf, statsNowAndBefore, xpOf, type Stat, type Stats } from "@/lib/skills";
 
 const WEEK_GOAL = 30; // 분
 const DAY = 24 * 60 * 60 * 1000;
@@ -32,6 +34,11 @@ export default function TrainPage() {
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [phrases, setPhrases] = useState<Phrase[]>([]);
   const [open, setOpen] = useState<string | null>(null);
+  const [tab, setTab] = useState<"today" | "game" | "records">("today");
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "game" || t === "records") setTab(t);
+  }, []);
 
   const reload = useCallback(async () => {
     const [s, p] = await Promise.all([listSessions(), listPhrases()]);
@@ -69,6 +76,8 @@ export default function TrainPage() {
   const doneCount = blocks.filter((b) => doneIds.has(b.id)).length;
   const streak = streakDays(sessions ?? []);
   const week = weekMinutes(sessions ?? []);
+  const level = levelOf(xpOf(sessions ?? [], phrases));
+  const missions = missionsOf(sessions ?? [], profile.top);
 
   async function saveDrill(kind: DrillKind, r: DrillResult, seconds: number) {
     await addSession({
@@ -125,11 +134,71 @@ export default function TrainPage() {
             <div className="h-full rounded-full bg-good" style={{ width: `${Math.min(100, (week / WEEK_GOAL) * 100)}%` }} />
           </div>
         </div>
-        <StatCard label="오늘의 루틴" value={`${doneCount} / ${blocks.length}`} sub={doneCount === blocks.length ? "오늘 루틴 완료!" : "하나씩 해 봐요"} />
+        <div className="rounded-2xl bg-surface p-4">
+          <div className="text-sm text-muted">레벨</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-2xl font-bold tabular-nums">Lv.{level.level}</span>
+            <span className="truncate text-sm font-semibold text-guide">{level.title}</span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-key" title={`${level.into}/${level.need} 경험치`}>
+            <div className="h-full rounded-full bg-guide" style={{ width: `${(level.into / level.need) * 100}%` }} />
+          </div>
+        </div>
       </section>
 
+      <section className="mt-4 rounded-2xl bg-surface p-4 sm:p-5">
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <h2 className="font-semibold">오늘의 미션</h2>
+          <span className="text-sm text-muted">
+            {missions.filter((m) => m.done).length}/{missions.length} 완료 · 날마다 바뀌어요
+          </span>
+        </div>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-3">
+          {missions.map((m) => (
+            <li key={m.id} className={`flex items-center gap-2.5 rounded-xl px-3 py-2.5 ${m.done ? "bg-good/10" : "bg-paper"}`}>
+              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-bold ${m.done ? "bg-good text-white" : "bg-key text-muted"}`}>
+                {m.done ? "✓" : ""}
+              </span>
+              <span className="min-w-0">
+                <span className={`block text-sm font-semibold ${m.done ? "text-good" : ""}`}>{m.text}</span>
+                <span className="block text-xs text-muted">{m.progress}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <div className="mt-6 flex gap-1 border-b border-line" role="tablist">
+        {(
+          [
+            ["today", `오늘의 루틴 ${doneCount}/${blocks.length}`],
+            ["game", "음정 게임"],
+            ["records", "내 기록"],
+          ] as const
+        ).map(([k, l]) => (
+          <button
+            key={k}
+            role="tab"
+            aria-selected={tab === k}
+            onClick={() => setTab(k)}
+            className={`-mb-px border-b-2 px-4 py-2.5 font-semibold ${tab === k ? "border-ink text-ink" : "border-transparent text-muted hover:text-ink"}`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab === "game" && (
+        <div className="mt-6">
+          <GameTab onSaved={reload} />
+        </div>
+      )}
+      {tab === "records" && <Records sessions={sessions} phrases={phrases} />}
+      {tab === "today" && (
+      <>
+
       {/* 루틴 */}
-      <section className="mt-8">
+      <section className="mt-6">
         <div className="flex flex-wrap items-baseline gap-x-3">
           <h2 className="text-xl font-semibold">오늘의 루틴</h2>
           <p className="text-sm text-muted">
@@ -199,8 +268,9 @@ export default function TrainPage() {
         )}
       </section>
 
-      <Growth sessions={sessions} />
       <PhraseList phrases={phrases} onSave={savePhrase} onDelete={async (id) => (await deletePhrase(id), reload())} />
+      </>
+      )}
     </main>
   );
 }
@@ -373,5 +443,120 @@ function PhraseList({
         </ul>
       )}
     </section>
+  );
+}
+
+/* ------------------------------------------------------------------ 내 기록: 능력치·칭호·성장 */
+
+function Records({ sessions, phrases }: { sessions: Session[]; phrases: Phrase[] }) {
+  const { now, before } = useMemo(() => statsNowAndBefore(sessions), [sessions]);
+  const badges = useMemo(() => badgesOf(sessions, phrases), [sessions, phrases]);
+  const got = badges.filter((b) => b.got).length;
+  const keys = Object.keys(STAT_LABEL) as Stat[];
+  const weakest = keys.filter((k) => now[k] != null).sort((a, b) => (now[a] ?? 0) - (now[b] ?? 0))[0];
+  return (
+    <div className="mt-6 space-y-6">
+      <section className="grid gap-6 rounded-2xl bg-surface p-4 sm:p-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div>
+          <h2 className="text-xl font-semibold">내 목소리 능력치</h2>
+          <p className="text-sm text-muted">최근 2주 기록이에요. 점선은 그 전 2주예요.</p>
+          <Radar now={now} before={before} />
+        </div>
+        <div className="space-y-3 self-center">
+          {keys.map((k) => {
+            const v = now[k];
+            const b = before[k];
+            return (
+              <div key={k}>
+                <div className="flex items-baseline justify-between text-sm">
+                  <span className="font-semibold">{STAT_LABEL[k]}</span>
+                  <span className="tabular-nums">
+                    {v == null ? <span className="text-muted">기록 없음</span> : Math.round(v)}
+                    {v != null && b != null && Math.round(v - b) !== 0 && (
+                      <span className={`ml-1.5 text-xs font-semibold ${v > b ? "text-good" : "text-bad"}`}>
+                        {v > b ? "▲" : "▼"}
+                        {Math.abs(Math.round(v - b))}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-key">
+                  <div className="h-full rounded-full bg-guide" style={{ width: `${v ?? 0}%` }} />
+                </div>
+              </div>
+            );
+          })}
+          {weakest && (
+            <p className="rounded-xl bg-paper p-3 text-sm">
+              <b>{STAT_LABEL[weakest]}</b>이(가) 가장 낮아요. {STAT_TIP[weakest]}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-2xl bg-surface p-4 sm:p-6">
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-xl font-semibold">칭호</h2>
+          <span className="text-sm text-muted">
+            {got}/{badges.length}개 모음
+          </span>
+        </div>
+        <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {badges.map((b) => (
+            <li key={b.id} className={`rounded-xl border p-3 ${b.got ? "border-guide/30 bg-guide-soft" : "border-dashed border-line opacity-60"}`}>
+              <div className="flex items-center gap-2">
+                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm ${b.got ? "bg-guide text-white" : "bg-key text-muted"}`} aria-hidden>
+                  {b.got ? "★" : "?"}
+                </span>
+                <span className="font-semibold">{b.name}</span>
+              </div>
+              <p className="mt-1.5 text-xs text-muted">{b.desc}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <Growth sessions={sessions} />
+    </div>
+  );
+}
+
+function Radar({ now, before }: { now: Stats; before: Stats }) {
+  const keys = Object.keys(STAT_LABEL) as Stat[];
+  const S = 260;
+  const c = S / 2;
+  const R = 92;
+  const pt = (i: number, v: number) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / keys.length;
+    return [c + Math.cos(a) * R * (v / 100), c + Math.sin(a) * R * (v / 100)] as const;
+  };
+  const poly = (st: Stats) => keys.map((k, i) => pt(i, st[k] ?? 0).join(",")).join(" ");
+  const hasBefore = keys.some((k) => before[k] != null);
+  const hasNow = keys.some((k) => now[k] != null);
+  return (
+    <svg viewBox={`0 0 ${S} ${S}`} className="mx-auto mt-2 h-auto w-full max-w-[320px]" role="img" aria-label="능력치 오각형 그래프">
+      {[25, 50, 75, 100].map((v) => (
+        <polygon key={v} points={keys.map((_, i) => pt(i, v).join(",")).join(" ")} fill="none" stroke="var(--color-line)" />
+      ))}
+      {keys.map((k, i) => {
+        const [x, y] = pt(i, 100);
+        const [lx, ly] = pt(i, 122);
+        return (
+          <g key={k}>
+            <line x1={c} y1={c} x2={x} y2={y} stroke="var(--color-line)" />
+            <text x={lx} y={ly + 4} textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--color-ink)">
+              {STAT_LABEL[k]}
+            </text>
+          </g>
+        );
+      })}
+      {hasBefore && <polygon points={poly(before)} fill="none" stroke="var(--color-muted)" strokeDasharray="4 3" strokeWidth="1.5" />}
+      {hasNow && <polygon points={poly(now)} fill="rgba(47,79,216,0.22)" stroke="var(--color-guide)" strokeWidth="2" />}
+      {!hasNow && (
+        <text x={c} y={c + 4} textAnchor="middle" fontSize="12" fill="var(--color-muted)">
+          연습하면 채워져요
+        </text>
+      )}
+    </svg>
   );
 }

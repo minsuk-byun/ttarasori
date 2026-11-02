@@ -535,6 +535,9 @@ export default function PracticePage() {
                 <button onClick={goCompare} className="rounded-lg bg-mine px-4 py-2.5 text-sm font-semibold hover:brightness-110">
                   바로 따라 부르고 비교하기
                 </button>
+                <a href="/train?tab=game" className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20">
+                  음정 게임으로 부르기
+                </a>
                 <button
                   onClick={() => {
                     const s = seed + 1;
