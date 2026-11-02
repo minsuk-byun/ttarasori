@@ -226,18 +226,28 @@ def run_practice(job_id: str):
 
     # 가사가 있으면 글자마다 발음을 만들어 노래로 이어 붙이기 (실패하면 '라'로 부른 멜로디 사용)
     sung = False
+    sing_error = None
     guide_src = melody44
     if syls:
         set_step(job_id, "가사로 노래 만들기", 0.1)
         try:
             guide_src = sing.sing(notes, total, SR)
             sung = True
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            sing_error = f"{type(e).__name__}: {e}"[:300]
             print("[ttarasori] 가사 노래 실패:\n" + traceback.format_exc()[-1500:], flush=True)
     sf.write(d / "melody.wav", guide_src, SR)
     (d / "notes.json").write_text(
         json.dumps(
-            {"notes": notes, "duration": total, "bpm": job["bpm"], "tonic": tonic, "lyrics": bool(syls), "sung": sung},
+            {
+                "notes": notes,
+                "duration": total,
+                "bpm": job["bpm"],
+                "tonic": tonic,
+                "lyrics": bool(syls),
+                "sung": sung,
+                "sing_error": sing_error,
+            },
             ensure_ascii=False,
         )
     )
@@ -331,8 +341,11 @@ def startup():
             import sing
 
             if sing.ready():
-                sing.warm()
-                print("[ttarasori] 가사 노래 모델 준비 완료", flush=True)
+                try:
+                    sing.warm()
+                    print("[ttarasori] 가사 노래 모델 준비 완료", flush=True)
+                except Exception:  # noqa: BLE001
+                    print("[ttarasori] 가사 노래 모델 로딩 실패:\n" + traceback.format_exc()[-1500:], flush=True)
             else:
                 print("[ttarasori] 가사 노래 패키지(pyworld)가 없어 '라'로만 불러요", flush=True)
         except Exception:  # noqa: BLE001

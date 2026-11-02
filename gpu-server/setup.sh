@@ -68,4 +68,8 @@ export SEED_VC_DIR=/root/seed-vc
 export HF_HOME="${HF_HOME:-/root/.cache/huggingface}"
 cd "$HERE"
 log "서버 시작 (모델 로딩까지 몇 분 더 걸려요)"
+# 서버 메시지도 VESSL 로그 화면에 보이도록 컨테이너 표준 출력으로 보냄
+if [ -w /proc/1/fd/1 ]; then
+  exec uvicorn server:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 75 > /proc/1/fd/1 2>&1
+fi
 exec uvicorn server:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 75
