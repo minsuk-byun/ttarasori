@@ -32,8 +32,18 @@ start_tunnel() {
   if [ ! -x /root/cloudflared ]; then
     log "cloudflared 내려받는 중"
     # 1순위: 우리 저장소 tools 브랜치 (git clone 은 학교망에서도 잘 돼요. 릴리스 다운로드 서버는 자주 막혀요)
-    if timeout 180 git clone -q --depth 1 -b tools https://github.com/minsuk-byun/ttarasori /tmp/ttarasori-tools 2>/dev/null &&
-      cp /tmp/ttarasori-tools/cloudflared-linux-amd64 /root/cloudflared; then
+    got_tools=0
+    for attempt in 1 2 3; do
+      rm -rf /tmp/ttarasori-tools
+      if err=$(timeout 180 git clone -q --depth 1 -b tools https://github.com/minsuk-byun/ttarasori /tmp/ttarasori-tools 2>&1) &&
+        cp /tmp/ttarasori-tools/cloudflared-linux-amd64 /root/cloudflared; then
+        got_tools=1
+        break
+      fi
+      log "tools 브랜치 받기 실패 ($attempt/3): $(echo "$err" | tail -1 | cut -c1-150)"
+      sleep $((attempt * 5))
+    done
+    if [ "$got_tools" = 1 ]; then
       chmod +x /root/cloudflared
       log "cloudflared 준비 완료 (저장소 tools 브랜치)"
     elif download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared; then
