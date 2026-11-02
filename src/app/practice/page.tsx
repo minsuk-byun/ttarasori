@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
 import { PianoRoll } from "@/components/Charts";
-import GuidedRecorder from "@/components/GuidedRecorder";
+import VoiceSetup from "@/components/VoiceSetup";
 import {
   createPracticeJob,
   fetchChunked,
@@ -421,46 +421,8 @@ export default function PracticePage() {
         </Step>
 
         <Step n={4} title="가이드를 부를 목소리" done={voiceOk}>
-          {voice && voiceMode !== "none" ? (
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-4">
-              <span className="grid h-10 w-10 place-items-center rounded-full bg-mine text-sm font-bold text-white" aria-hidden>
-                나
-              </span>
-              <div className="min-w-0">
-                <div className="font-semibold">내 목소리로 가이드를 불러요</div>
-                <div className="truncate text-sm text-muted">{voice.name}</div>
-              </div>
-              <button
-                onClick={() => {
-                  setVoice(null);
-                  setVoiceMode("guided");
-                }}
-                className="ml-auto rounded-lg border border-line px-3 py-1.5 text-sm hover:border-ink"
-              >
-                다시 등록
-              </button>
-            </div>
-          ) : voiceMode === "guided" ? (
-            <GuidedRecorder
-              onDone={(blob) => {
-                const v: AudioSource = { name: "따라 부르기 녹음", blob, origin: "record" };
-                setVoice(v);
-                setRegisteredVoice(v);
-              }}
-              onCancel={() => setVoiceMode("file")}
-            />
-          ) : voiceMode === "file" ? (
-            <AudioInput
-              label="목소리 샘플"
-              hint="반주 없이 부른 노래를 10~30초 올리거나 녹음해 주세요."
-              tone="mine"
-              value={voice}
-              onChange={(v) => {
-                setVoice(v);
-                if (v) setRegisteredVoice(v);
-              }}
-              allowRecord
-            />
+          {voiceMode !== "none" ? (
+            <VoiceSetup value={voice} onChange={setVoice} />
           ) : (
             <p className="rounded-xl bg-surface p-4 text-sm text-muted">목소리 없이, 부드러운 합성음으로 가이드 멜로디를 넣어요.</p>
           )}
@@ -469,7 +431,7 @@ export default function PracticePage() {
               type="checkbox"
               className="accent-mine"
               checked={voiceMode === "none"}
-              onChange={(e) => setVoiceMode(e.target.checked ? "none" : voice ? "file" : "guided")}
+              onChange={(e) => setVoiceMode(e.target.checked ? "none" : "guided")}
             />
             목소리 없이 만들기 (더 빨라요)
           </label>

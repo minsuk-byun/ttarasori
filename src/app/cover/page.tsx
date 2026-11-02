@@ -3,12 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
-import GuidedRecorder from "@/components/GuidedRecorder";
+import VoiceSetup from "@/components/VoiceSetup";
 import LibraryPicker, { PracticeEmpty } from "@/components/LibraryPicker";
 import { saveToLibrary } from "@/lib/practiceLibrary";
 import { createJob, fetchChunked, getGpuConfig, getJob, resultUrl, type GpuConfig } from "@/lib/gpu";
 import { getSample } from "@/lib/samples";
-import { setPendingGuide, setRegisteredVoice, type AudioSource } from "@/lib/store";
+import { setPendingGuide, type AudioSource } from "@/lib/store";
 
 const COVER_STEPS = ["음원 올리기", "보컬과 반주 분리", "내 목소리로 변환", "반주와 합치기"];
 
@@ -23,7 +23,6 @@ export default function CoverPage() {
   const [gpu, setGpu] = useState<GpuConfig | null>(null);
   const [voice, setVoice] = useState<AudioSource | null>(null);
   const [voiceReady, setVoiceReady] = useState(false);
-  const [guided, setGuided] = useState(true);
   const [songSource, setSongSource] = useState<"file" | "practice">("file");
   const [song, setSong] = useState<AudioSource | null>(null);
   const [key, setKey] = useState(0);
@@ -126,7 +125,7 @@ export default function CoverPage() {
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">AI 커버 만들기</h1>
       <p className="mt-3 text-[17px] leading-relaxed text-muted">
-        짧은 소절 몇 개만 따라 부르면, 어떤 노래든 내 목소리로 부른 커버를 만들 수 있어요.
+        짧은 글을 15초만 읽어 목소리를 등록하면, 어떤 노래든 내 목소리로 부른 커버를 만들 수 있어요.
       </p>
       {gpu && !live && (
         <p className="mt-4 rounded-xl bg-guide-soft px-4 py-3 text-sm leading-relaxed text-guide">
@@ -136,55 +135,14 @@ export default function CoverPage() {
 
       <ol className="mt-10 space-y-10">
         <Step n={1} title="내 목소리 등록" done={voiceReady}>
-          {!voice && guided ? (
-            <GuidedRecorder
-              onDone={(blob) => {
-                setVoice({ name: "따라 부르기 녹음", blob, origin: "record" });
-                setVoiceReady(false);
-                setState({ kind: "idle" });
-              }}
-              onCancel={() => setGuided(false)}
-            />
-          ) : (
-            <AudioInput
-              label="목소리 샘플"
-              hint="반주 없이 편하게 부른 노래를 10~30초 올리거나 녹음해 주세요. 조용한 곳에서 녹음할수록 결과가 좋아요."
-              tone="mine"
-              value={voice}
-              onChange={(v) => {
-                setVoice(v);
-                setVoiceReady(false);
-                setState({ kind: "idle" });
-                if (!v) setGuided(true);
-              }}
-              allowRecord
-            />
-          )}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {!voiceReady && (
-              <button
-                disabled={!voice}
-                onClick={() => {
-                  setVoiceReady(true);
-                  if (voice) setRegisteredVoice(voice);
-                }}
-                className="rounded-xl bg-ink px-5 py-2.5 font-semibold text-white disabled:opacity-35"
-              >
-                이 목소리로 등록하기
-              </button>
-            )}
-            {!voice && !guided && (
-              <button onClick={() => setGuided(true)} className="rounded-xl px-3 py-2.5 text-sm font-semibold text-mine hover:bg-mine-soft">
-                따라 부르며 녹음하기
-              </button>
-            )}
-            {!voice && (
-              <button onClick={() => setVoice(getSample("mine"))} className="rounded-xl px-3 py-2.5 text-sm font-semibold text-guide hover:bg-guide-soft">
-                샘플 목소리 쓰기
-              </button>
-            )}
-          </div>
-          {voiceReady && <p className="mt-3 text-sm text-good">목소리가 등록됐어요. 커버를 만들 때 이 음색을 써요.</p>}
+          <VoiceSetup
+            value={voice}
+            onChange={(v) => {
+              setVoice(v);
+              setVoiceReady(!!v);
+              setState({ kind: "idle" });
+            }}
+          />
         </Step>
 
         <Step n={2} title="부를 노래 고르기" done={state.kind === "done"} disabled={!voiceReady}>
