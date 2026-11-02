@@ -53,11 +53,11 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <h2 className="text-2xl font-bold tracking-tight">이렇게 써요</h2>
           <p className="mt-2 text-muted">
-            순서대로 하면 가장 편하지만, 이미 음원이 있으면 아무 단계에서나 시작해도 돼요. 아는 노래를 원곡 그대로 불러 보고 싶다면{" "}
+            순서대로 하면 가장 편하지만, 이미 음원이 있으면 아무 단계에서나 시작해도 돼요. AI 커버가 없다면{" "}
             <Link href="/original" className="font-semibold text-guide underline-offset-4 hover:underline">
-              원곡 따라 부르기
+              유튜브 원곡을 들으며 내 목소리 가이드
             </Link>
-            로 바로 가요.
+            를 만들어 3단계로 바로 갈 수도 있어요.
           </p>
           <ol className="mt-8 grid gap-8 md:grid-cols-3">
             {STEPS.map((s, i) => (

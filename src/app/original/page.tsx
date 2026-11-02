@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import TunedVersion from "@/components/TunedVersion";
 import { scoreColor } from "@/components/Charts";
@@ -9,6 +11,8 @@ import { splitLines } from "@/lib/audio/notes.ts";
 import { beatsFromTaps, pitchLabel, selfCheck, snapTarget, type SelfCheck, type SelfNote } from "@/lib/audio/selfcheck.ts";
 import { SAMPLE_RATE } from "@/lib/audio/synth.ts";
 import { parseVideoId, useYouTube } from "@/lib/useYouTube";
+import { saveToLibrary } from "@/lib/practiceLibrary";
+import { setPendingGuide } from "@/lib/store";
 
 interface Video {
   id: string;
@@ -32,12 +36,24 @@ export default function OriginalPage() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
       <div className="max-w-2xl">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">원곡 따라 부르기</h1>
+        <Link href="/compare" className="text-sm font-semibold text-muted hover:text-ink">
+          ← 내 노래 비교
+        </Link>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">원곡으로 내 목소리 가이드 만들기</h1>
         <p className="mt-3 text-[17px] leading-relaxed text-muted">
-          유튜브 원곡을 틀어 놓고 따라 부르면, 내 목소리만 녹음해서 음정·흔들림·박자를 짚어 드려요. 음정만 정확하게 고친 내 목소리 교정본도 만들 수 있어요.
+          비교할 AI 커버가 없어도 괜찮아요. 유튜브 원곡을 들으며 한 번 불러 보면, 음정만 정확하게 고친 <b className="text-ink">내 목소리 가이드</b>를 만들어 드려요.
+          그 가이드를 기준으로 다시 부르며 글자별 피드백과 구간 반복 연습을 할 수 있어요.
         </p>
       </div>
-      <ul className="mt-5 flex flex-wrap gap-2 text-sm">
+      <ol className="mt-5 grid gap-2 text-sm sm:grid-cols-4">
+        {["원곡 고르기", "원곡 들으며 한 번 부르기", "음정 고친 내 목소리 가이드 만들기", "가이드로 비교 연습"].map((t, i) => (
+          <li key={t} className="flex items-center gap-2 rounded-xl bg-surface px-3 py-2.5">
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink text-xs font-bold text-white">{i + 1}</span>
+            {t}
+          </li>
+        ))}
+      </ol>
+      <ul className="mt-3 flex flex-wrap gap-2 text-sm">
         {["원곡은 유튜브 공식 플레이어로 재생만 해요", "원곡 소리는 내려받거나 분석하지 않아요", "녹음은 이 브라우저 안에서만 써요"].map((t) => (
           <li key={t} className="rounded-full bg-guide-soft px-3 py-1 font-medium text-guide">
             {t}
@@ -439,7 +455,7 @@ function Studio({ video, onChange }: { video: Video; onChange: () => void }) {
 
       {take && (
         <div ref={resultRef} className="scroll-mt-6">
-          <Result take={take} seekOriginal={(t, d) => {
+          <Result take={take} title={video.title} seekOriginal={(t, d) => {
             const pl = yt.player.current;
             if (!pl) return;
             pl.setPlaybackRate(1);
@@ -468,7 +484,8 @@ const TIPS: Record<string, string> = {
   outOfScale: "이 곡의 음계에 없는 음이에요. 원곡에서 이 부분을 다시 듣고 같은 음인지 확인해 보세요.",
 };
 
-function Result({ take, seekOriginal }: { take: Take; seekOriginal: (t: number, dur: number) => void }) {
+function Result({ take, title, seekOriginal }: { take: Take; title: string; seekOriginal: (t: number, dur: number) => void }) {
+  const router = useRouter();
   const c = take.check;
   const o = c.overall;
   const [sel, setSel] = useState<number | null>(null);
@@ -543,13 +560,39 @@ function Result({ take, seekOriginal }: { take: Take; seekOriginal: (t: number, 
         resetKey={c}
         mine={take.blob}
         onReady={setTuned}
+        title="내 목소리 가이드 만들기"
+        actionLabel="가이드 만들기"
         description={
           <>
-            내 녹음의 각 음을 <b className="text-ink">가장 가까운 정확한 음</b>으로 맞춰서 내 목소리 그대로 들려드려요. 원곡 음원은 쓰지 않고, 박자·발음·음색은
-            그대로예요.
+            내 녹음의 각 음을 <b className="text-ink">가장 가까운 정확한 음</b>으로 맞춰서 내 목소리 가이드를 만들어요. 원곡 음원은 쓰지 않고, 박자·발음·음색은
+            그대로예요. 처음에 원곡과 다른 음을 불렀다면 가이드에도 그 음이 남으니, 아래 음별 피드백에서 &lsquo;원곡 이 부분&rsquo;과 비교해 확인해 보세요.
           </>
         }
       />
+
+      {tuned && (
+        <section className="flex flex-wrap items-center gap-4 rounded-2xl bg-ink p-5 text-white sm:p-6">
+          <div className="max-w-xl flex-1">
+            <div className="text-sm font-semibold text-white/60">다음 단계</div>
+            <h2 className="mt-0.5 text-xl font-semibold">이 가이드로 비교 연습하기</h2>
+            <p className="mt-1 text-sm text-white/70">
+              내 목소리 가이드를 들으며 다시 부르면, 기존 비교 화면에서 음정 곡선·글자별 피드백·구간 반복·점수 변화를 볼 수 있어요. 가이드는 이 브라우저에 저장돼서 나중에도 고를 수
+              있어요.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              const name = `${(title || "원곡").slice(0, 30)} 내 목소리 가이드`;
+              saveToLibrary({ kind: "cover", title: name, mix: tuned, vocals: tuned });
+              setPendingGuide({ name, blob: tuned, origin: "cover" }, null);
+              router.push("/compare");
+            }}
+            className="rounded-xl bg-white px-5 py-3 font-semibold text-ink hover:bg-white/90"
+          >
+            가이드로 비교 연습 →
+          </button>
+        </section>
+      )}
 
       <section className="rounded-2xl bg-surface p-4 sm:p-6">
         <h2 className="text-xl font-semibold">음별 피드백</h2>

@@ -48,9 +48,11 @@ interface Props {
   resetKey: unknown;
   /** 설명 문구 (기본: AI 커버에 맞추기) */
   description?: React.ReactNode;
+  title?: string;
+  actionLabel?: string;
 }
 
-export default function TunedVersion({ makeTarget, mine, onReady, resetKey, description }: Props) {
+export default function TunedVersion({ makeTarget, mine, onReady, resetKey, description, title = "내 목소리 교정본", actionLabel = "교정본 만들기" }: Props) {
   const [gpu, setGpu] = useState<boolean | null>(null);
   const [state, setState] = useState<State>({ kind: "idle" });
   const alive = useRef(true);
@@ -110,7 +112,7 @@ export default function TunedVersion({ makeTarget, mine, onReady, resetKey, desc
     <section className="rounded-2xl border-l-4 border-good bg-surface p-4 sm:p-6">
       <div className="flex flex-wrap items-start gap-4">
         <div className="max-w-2xl flex-1">
-          <h2 className="text-xl font-semibold">내 목소리 교정본</h2>
+          <h2 className="text-xl font-semibold">{title}</h2>
           <p className="mt-1 text-[15px] leading-relaxed text-muted">
             {description ?? (
               <>
@@ -126,7 +128,7 @@ export default function TunedVersion({ makeTarget, mine, onReady, resetKey, desc
             disabled={state.kind === "working" || gpu === false}
             className="rounded-xl bg-good px-5 py-3 font-semibold text-white hover:brightness-110 disabled:opacity-40"
           >
-            {state.kind === "working" ? "만드는 중" : "교정본 만들기"}
+            {state.kind === "working" ? "만드는 중" : actionLabel}
           </button>
         )}
       </div>

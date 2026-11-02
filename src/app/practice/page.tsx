@@ -261,7 +261,7 @@ export default function PracticePage() {
                   href={`/original?v=${picked.id}&title=${encodeURIComponent(picked.title)}&channel=${encodeURIComponent(picked.channel)}`}
                   className="ml-auto shrink-0 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-ink hover:bg-white/90"
                 >
-                  이 원곡 따라 부르기
+                  이 원곡으로 가이드 만들기
                 </a>
                 <button onClick={() => setPicked(null)} className="shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/20">
                   다른 곡 고르기

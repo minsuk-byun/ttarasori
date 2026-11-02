@@ -9,8 +9,7 @@ const LINKS = [
   { href: "/cover", label: "AI 커버 만들기", short: "AI 커버" },
   { href: "/compare", label: "내 노래 비교", short: "비교·교정" },
 ];
-// 단계와 별개로 쓰는 메뉴
-const EXTRA = [{ href: "/original", label: "원곡 따라 부르기", short: "원곡" }];
+
 
 export default function Nav() {
   const path = usePathname();
@@ -23,7 +22,8 @@ export default function Nav() {
         </Link>
         <div className="ml-auto flex gap-1 overflow-x-auto text-[15px] [scrollbar-width:none]">
           {LINKS.map((l, i) => {
-            const on = path === l.href;
+            // 원곡으로 가이드 만들기는 3단계(비교·교정)에 속한 화면
+            const on = path === l.href || (l.href === "/compare" && path === "/original");
             return (
               <Link
                 key={l.href}
@@ -40,26 +40,6 @@ export default function Nav() {
                   aria-hidden
                 >
                   {i + 1}
-                </span>
-                <span className="hidden sm:inline">{l.label}</span>
-                <span className="sm:hidden">{l.short}</span>
-              </Link>
-            );
-          })}
-          <span className="mx-1 my-2 w-px shrink-0 bg-line" aria-hidden />
-          {EXTRA.map((l) => {
-            const on = path === l.href;
-            return (
-              <Link
-                key={l.href}
-                href={l.href}
-                aria-current={on ? "page" : undefined}
-                className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors sm:px-3 ${
-                  on ? "bg-ink text-white" : "text-muted hover:bg-key hover:text-ink"
-                }`}
-              >
-                <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] ${on ? "bg-white text-ink" : "bg-guide-soft text-guide"}`} aria-hidden>
-                  ♪
                 </span>
                 <span className="hidden sm:inline">{l.label}</span>
                 <span className="sm:hidden">{l.short}</span>

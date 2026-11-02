@@ -103,14 +103,19 @@ export default function ComparePage() {
         <p className="mt-3 text-[17px] leading-relaxed text-muted">
           AI가 내 목소리로 부른 커버와 직접 부른 노래를 겹쳐 보고, 음정·박자·강약이 달라지는 구간과 연습 방법을 알려 드려요.
         </p>
-        <p className="mt-2 text-sm text-muted">
-          원곡을 들으며 바로 불러 보고 싶다면{" "}
-          <a href="/original" className="font-semibold text-guide underline-offset-2 hover:underline">
-            원곡 따라 부르기
-          </a>
-          를 써 보세요.
-        </p>
       </div>
+
+      {!guide && libFor !== "guide" && (
+        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-guide/40 bg-guide-soft/60 px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold">비교할 AI 커버가 없나요?</div>
+            <p className="text-sm text-muted">유튜브 원곡을 들으며 한 번 불러 보면, 음정을 고친 내 목소리 가이드를 만들어서 여기로 바로 가져와요.</p>
+          </div>
+          <a href="/original" className="shrink-0 rounded-lg bg-guide px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110">
+            원곡으로 가이드 만들기
+          </a>
+        </div>
+      )}
 
       <div className="mt-8 grid items-start gap-4 md:grid-cols-2">
         {libFor === "guide" ? (
