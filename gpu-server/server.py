@@ -229,6 +229,14 @@ def run_practice(job_id: str):
     melody32 = render_melody(notes, total, 32000)
     melody44 = render_melody(notes, total, SR)
 
+    # 반주는 멜로디만 있으면 만들 수 있어서, 가사 노래와 동시에 시작해요 (기다리는 시간 절약)
+    import concurrent.futures as cf
+
+    pool = cf.ThreadPoolExecutor(max_workers=1)
+    t_backing = time.time()
+    backing_future = pool.submit(generate_backing, melody32, 32000, job["prompt"], total)
+    pool.shutdown(wait=False)
+
     # 가사가 있으면 글자마다 발음을 만들어 노래로 이어 붙이기 (실패하면 '라'로 부른 멜로디 사용)
     sung = False
     sing_error = None
@@ -278,7 +286,8 @@ def run_practice(job_id: str):
     )
 
     set_step(job_id, "반주 만들기", 0.15)
-    backing, bsr = generate_backing(melody32, 32000, job["prompt"], total)
+    backing, bsr = backing_future.result()
+    print(f"[ttarasori] 반주 준비 (동시 진행, 시작부터 {time.time() - t_backing:.0f}초)", flush=True)
     backing = librosa.resample(backing, orig_sr=bsr, target_sr=SR).astype(np.float32)
     backing = backing / max(1e-6, float(np.max(np.abs(backing)))) * 0.6
     # 반주가 멜로디보다 짧으면 페이드아웃, 길면 자르기
