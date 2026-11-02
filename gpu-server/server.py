@@ -223,7 +223,7 @@ def run_practice(job_id: str):
     notes, total, tonic = make_melody(job["bpm"], job["minor"], job["low"], job["seed"])
     syls = sing.syllables(job.get("lyrics") or "")
     if syls:
-        notes = sing.fit_notes(notes, len(syls))
+        notes = sing.ensure_min(sing.fit_notes(notes, len(syls)))
         for nt, sy in zip(notes, syls):
             nt["syllable"] = sy
     melody32 = render_melody(notes, total, 32000)

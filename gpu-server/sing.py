@@ -42,6 +42,49 @@ def fit_notes(notes: list[dict], n: int) -> list[dict]:
     return notes
 
 
+def ensure_min(notes: list[dict], min_dur: float = 0.2, keep: float = 0.3) -> list[dict]:
+    """글자마다 최소 길이 보장: 너무 짧은 음은 뒤 쉼표나 이웃한 긴 음에서 시간을 가져와요.
+    짧은 음에 글자가 몰리면 자음·모음·받침이 들어갈 시간이 없어 발음이 뭉개져요 ('너는 잘했어').
+    keep: 시간을 내주는 음이 지켜야 할 최소 길이. 음 순서와 높이는 그대로, 시작 시각만 조금 움직여요."""
+    notes = [dict(x) for x in notes]
+    n = len(notes)
+    end = lambda k: notes[k]["start"] + notes[k]["dur"]  # noqa: E731
+    for _ in range(3):
+        for i in range(n):
+            need = min_dur - notes[i]["dur"]
+            if need <= 1e-4:
+                continue
+            # 1) 바로 뒤 쉼표에서
+            if i + 1 < n:
+                gap = notes[i + 1]["start"] - end(i)
+                take = min(need, max(0.0, gap - 0.02))
+                notes[i]["dur"] += take
+                need -= take
+            elif i == n - 1:
+                notes[i]["dur"] += need
+                need = 0
+            # 2) 이웃한 긴 음에서 (뒤 음이면 그 시작을 늦추고, 앞 음이면 내 시작을 당겨요)
+            for j in sorted([k for k in (i - 1, i + 1) if 0 <= k < n], key=lambda k: -notes[k]["dur"]):
+                if need <= 1e-4:
+                    break
+                touching = abs((notes[j]["start"] - end(i)) if j > i else (notes[i]["start"] - end(j))) < 0.05
+                take = min(need, max(0.0, notes[j]["dur"] - keep))
+                if not touching or take <= 0:
+                    continue
+                if j > i:
+                    notes[j]["start"] += take
+                    notes[j]["dur"] -= take
+                    notes[i]["dur"] += take
+                else:
+                    notes[j]["dur"] -= take
+                    notes[i]["start"] -= take
+                    notes[i]["dur"] += take
+                need -= take
+    for x in notes:
+        x["start"], x["dur"] = round(x["start"], 4), round(x["dur"], 4)
+    return notes
+
+
 # ---------------------------------------------------------------- 로마자 변환 (MMS 한국어 모델 입력용)
 _I = ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h"]
 _V = ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i"]

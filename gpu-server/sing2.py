@@ -223,8 +223,10 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             room = int(max(0.0, nt["start"] - max(prev_end - borrow, nt["start"] - on * FRAME)) / FRAME)
             on_out = min(on, room)
             on_idx = np.round(np.linspace(fs, fs + on - 1, on_out)).astype(int) if on_out > 0 else np.array([], dtype=int)
-            # 음이 너무 짧으면 받침·모음을 비율대로 줄여요
-            coda_n = min(len(coda_src), max(1, want // 4))
+            # 짧은 음: 받침은 최대한 지키고 모음을 줄여요 (모음은 최소 30ms 또는 40%).
+            # 예전엔 받침도 같이 줄여서 '잘했어'의 '잘'처럼 받침 있는 글자가 뭉개졌어요.
+            nuc_min = max(6, int(want * 0.4))
+            coda_n = min(len(coda_src), max(1 if len(coda_src) else 0, want - nuc_min))
             nuc_n = max(2, want - coda_n)
             nuc_idx = np.round(np.linspace(nuc_src[0], nuc_src[-1], nuc_n)).astype(int)
             coda_idx = np.round(np.linspace(coda_src[0], coda_src[-1], coda_n)).astype(int) if len(coda_src) else np.array([], dtype=int)
