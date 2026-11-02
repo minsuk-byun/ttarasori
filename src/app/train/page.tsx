@@ -135,7 +135,9 @@ export default function TrainPage() {
           <p className="text-sm text-muted">
             {profile.samples
               ? `최근 기록 ${profile.samples}개를 보고 골랐어요.${profile.range ? ` 내 음역(${noteName(profile.range.low)}~${noteName(profile.range.high)})에 맞췄어요.` : ""}`
-              : "아직 기록이 없어서 기본 루틴이에요. 내 노래 비교를 하면 약점에 맞춰져요."}
+              : sessions.some((x) => isToday(x.at))
+                ? "오늘 기록은 내일 루틴부터 반영돼요. 오늘은 기본 루틴이에요."
+                : "아직 기록이 없어서 기본 루틴이에요. 내 노래 비교를 하면 약점에 맞춰져요."}
           </p>
         </div>
         <ol className="mt-4 space-y-3">
