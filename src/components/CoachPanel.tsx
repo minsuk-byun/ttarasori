@@ -63,7 +63,8 @@ export default function CoachPanel({ coach, notes, hasLyrics, player, guideBlob,
       if (useLyrics) expected = lyricSyls.map((n) => ({ s: n.syllable, t0: n.start, t1: n.start + n.dur }));
       else expected = sylsFromTranscript(res.guide);
       if (expected.length < 4) throw new Error("가이드에서 가사를 충분히 알아듣지 못했어요. 가사가 있는 연습곡으로 해 보세요.");
-      const heard = hangulOnly(dedupeWords(res.mine.text));
+      const expText = expected.map((e) => e.s).join("");
+      const heard = hangulOnly(dropHallucinations(dedupeWords(res.mine.text), expText));
       const syl = alignSyllables(
         expected.map((e) => e.s),
         heard,
@@ -228,10 +229,18 @@ function ItemRow({ it, player }: { it: CoachItem; player: Player }) {
 
 function PronResult({ syl, heard, player }: { syl: PronSyl[]; heard: string; player: Player }) {
   const ok = syl.filter((s) => s.status === "ok").length;
+  // 거의 못 알아들었으면 발음 탓이 아니라 녹음·인식 문제일 가능성이 커요
+  const unreliable = ok / Math.max(1, syl.length) < 0.35;
   const bad = syl.filter((s) => s.status !== "ok");
   const byType = (t: string[]) => bad.filter((s) => t.includes(s.status)).length;
   return (
     <div className="mt-3 space-y-4">
+      {unreliable && (
+        <p className="rounded-xl border border-warn/40 bg-[#fbf0de] p-3 text-sm">
+          음성 인식이 이 녹음을 거의 알아듣지 못했어요. 발음 문제라기보다 녹음 소리가 작거나, 반주·잡음이 섞였거나, 노래가 빨라서일 수 있어요. 마이크 가까이에서 반주 없이(이어폰
+          사용) 다시 녹음해 보세요. 아래 결과는 참고만 해 주세요.
+        </p>
+      )}
       <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
         <span>
           또렷하게 들린 글자 <b className="text-2xl tabular-nums">{Math.round((ok / Math.max(1, syl.length)) * 100)}%</b>
@@ -291,7 +300,7 @@ function sylsFromTranscript(t?: Transcript): { s: string; t0: number; t1: number
   if (!t) return [];
   const out: { s: string; t0: number; t1: number }[] = [];
   for (const ch of t.chunks) {
-    const syls = hangulOnly(dedupeWords(ch.text));
+    const syls = hangulOnly(dropHallucinations(dedupeWords(ch.text), ""));
     if (!syls.length) continue;
     const a = ch.start ?? (out.length ? out[out.length - 1].t1 : 0);
     const b = ch.end ?? a + syls.length * 0.3;
@@ -314,4 +323,16 @@ function dedupeWords(text: string): string {
     out.push(w);
   }
   return out.join(" ");
+}
+
+/** 음성 인식이 소리가 불분명할 때 지어내는 흔한 문장 (가사에 실제로 있으면 그대로 둬요) */
+const HALLUCINATIONS = ["시청해주셔서", "시청해 주셔서", "감사합니다", "구독과 좋아요", "구독", "좋아요", "알림 설정", "다음 영상에서", "MBC 뉴스", "뉴스", "자막 제공"];
+function dropHallucinations(text: string, expected: string): string {
+  let out = text;
+  const exp = expected.replace(/\s+/g, "");
+  for (const h of HALLUCINATIONS) {
+    if (exp.includes(h.replace(/\s+/g, ""))) continue;
+    out = out.split(h).join(" ");
+  }
+  return out;
 }
