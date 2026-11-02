@@ -448,6 +448,18 @@ def startup():
 
     threading.Thread(target=warm, daemon=True).start()
 
+    # MeloTTS 는 뒤에서 설치되니, 설치가 끝나면 작업자를 미리 띄워 둬요 (첫 연습곡이 느리지 않게)
+    def warm_melo():
+        try:
+            import sing2
+
+            if sing2.warm_melo():
+                print("[ttarasori] MeloTTS 작업자 준비 완료", flush=True)
+        except Exception:  # noqa: BLE001
+            print("[ttarasori] MeloTTS 작업자 실패:\n" + traceback.format_exc()[-1000:], flush=True)
+
+    threading.Thread(target=warm_melo, daemon=True).start()
+
 
 # ---------------------------------------------------------------- API
 def _lyrics_ready() -> bool:

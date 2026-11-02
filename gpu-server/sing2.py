@@ -13,6 +13,7 @@ import os
 import subprocess
 import tempfile
 import threading
+import time
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -54,20 +55,73 @@ def melo_ready() -> bool:
     return os.path.exists(MELO_OK) and os.path.exists(MELO_PY)
 
 
-def tts_melo(lines: list[str], speed: float) -> list[tuple[np.ndarray, int]]:
+_melo = None
+_melo_lock = threading.Lock()
+
+
+def _melo_proc():
+    """MeloTTS 를 한 번만 불러 두고 계속 쓰는 작업자 (매번 불러오면 1~2분씩 걸려요)"""
+    global _melo
+    if _melo is not None and _melo.poll() is None:
+        return _melo
+    log = open("/opt/melo-worker.log", "a")
+    _melo = subprocess.Popen(
+        [MELO_PY, str(HERE / "melo_tts.py"), "--serve"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=log,
+        text=True,
+        bufsize=1,
+    )
+    msg = _melo_read(_melo, 600)
+    if not msg.get("ready"):
+        raise RuntimeError("MeloTTS 작업자가 준비되지 않았어요")
+    return _melo
+
+
+def _melo_read(p, timeout: float) -> dict:
+    import select
+
+    end = time.time() + timeout
+    while time.time() < end:
+        r, _, _ = select.select([p.stdout], [], [], max(0.1, end - time.time()))
+        if not r:
+            break
+        line = p.stdout.readline()
+        if not line:
+            raise RuntimeError("MeloTTS 작업자가 멈췄어요")
+        if line.startswith("@@"):
+            return json.loads(line[2:])
+    raise TimeoutError("MeloTTS 응답이 없어요")
+
+
+def warm_melo():
+    """서버 시작 뒤 MeloTTS 설치가 끝나면(최대 40분) 작업자를 미리 띄워 둬요"""
+    for _ in range(480):
+        if melo_ready():
+            with _melo_lock:
+                _melo_proc()
+            return True
+        time.sleep(5)
+    return False
+
+
+def tts_melo_line(text: str, speed: float) -> tuple[np.ndarray, int]:
     import soundfile as sf
 
-    with tempfile.TemporaryDirectory() as d:
-        cfg = Path(d) / "cfg.json"
-        cfg.write_text(json.dumps({"lines": lines, "speed": speed, "out": d}, ensure_ascii=False), encoding="utf-8")
-        subprocess.run([MELO_PY, str(HERE / "melo_tts.py"), str(cfg)], check=True, capture_output=True, timeout=300)
-        out = []
-        for i in range(len(lines)):
-            x, sr = sf.read(str(Path(d) / f"line{i}.wav"), dtype="float64")
-            if x.ndim > 1:
-                x = x.mean(axis=1)
-            out.append((x, sr))
-        return out
+    with _melo_lock:
+        p = _melo_proc()
+        with tempfile.TemporaryDirectory() as d:
+            out = str(Path(d) / "line.wav")
+            p.stdin.write(json.dumps({"text": text, "speed": speed, "out": out}, ensure_ascii=False) + "\n")
+            p.stdin.flush()
+            res = _melo_read(p, 120)
+            if not res.get("ok"):
+                raise RuntimeError(res.get("error", "MeloTTS 실패"))
+            x, sr = sf.read(out, dtype="float64")
+    if x.ndim > 1:
+        x = x.mean(axis=1)
+    return x, sr
 
 
 # ---------------------------------------------------------------- 강제 정렬
@@ -125,6 +179,7 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
     out_ap = np.ones((n_out, fft // 2 + 1))
     mask = np.zeros(n_out)
     prev_end = -1.0
+    prev_start = -1.0
     prev_hz = None
 
     for (x, sr), idxs in zip(lines_audio, groups):
@@ -162,8 +217,10 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
 
             dur = max(0.08, nt["dur"] - 0.02)
             want = int(dur / FRAME)
-            # 자음은 박 앞에 (앞 음과 겹치지 않을 만큼만)
-            room = int(max(0.0, nt["start"] - max(prev_end, nt["start"] - on * FRAME)) / FRAME)
+            # 자음은 박 앞에. 앞 음과 붙어 있으면 앞 음 끝을 최대 60ms(앞 음 길이의 35%)까지 빌려서라도
+            # 자음 길이를 지켜요. 자음이 눌리면 '너는 잘했어' 같은 빽빽한 곳이 뭉개져요.
+            borrow = min(0.06, max(0.0, (prev_end - prev_start) * 0.35)) if prev_end > 0 else 0.0
+            room = int(max(0.0, nt["start"] - max(prev_end - borrow, nt["start"] - on * FRAME)) / FRAME)
             on_out = min(on, room)
             on_idx = np.round(np.linspace(fs, fs + on - 1, on_out)).astype(int) if on_out > 0 else np.array([], dtype=int)
             # 음이 너무 짧으면 받침·모음을 비율대로 줄여요
@@ -190,6 +247,7 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
                     h *= 2 ** ((22 * min(1, (tt - 0.35) / 0.25) * np.sin(2 * np.pi * 5.4 * tt)) / 1200)
                 out_f0[o] = h if (in_nuc or f0[si] > 0) else 0.0
                 mask[o] = 1.0
+            prev_start = nt["start"]
             prev_end = nt["start"] + dur
             prev_hz = hz
 
@@ -204,21 +262,35 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
 
 
 # ---------------------------------------------------------------- 또렷함 검사
-def clarity(y: np.ndarray, sr: int, orig: list[str], pron: list[str]) -> float | None:
+def _heard(y: np.ndarray, sr: int) -> list[str] | None:
     try:
         import librosa
         import pronounce
 
         if not pronounce.ready():
             return None
-        heard = sing.HANGUL.findall(pronounce.transcribe(librosa.resample(y, orig_sr=sr, target_sr=16000), 16000)["text"])
-        return max(SequenceMatcher(None, orig, heard).ratio(), SequenceMatcher(None, pron, heard).ratio())
+        return sing.HANGUL.findall(pronounce.transcribe(librosa.resample(y, orig_sr=sr, target_sr=16000), 16000)["text"])
     except Exception:  # noqa: BLE001
         return None
 
 
+def _ratio(expect_orig: list[str], expect_pron: list[str], heard: list[str]) -> float:
+    return max(SequenceMatcher(None, expect_orig, heard).ratio(), SequenceMatcher(None, expect_pron, heard).ratio())
+
+
+def clarity(y: np.ndarray, sr: int, orig: list[str], pron: list[str]) -> float | None:
+    h = _heard(y, sr)
+    return None if h is None else _ratio(orig, pron, h)
+
+
+LINE_GOOD = 0.75
+
+
 def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str]], line_texts: list[str]) -> tuple[np.ndarray, dict]:
-    """여러 방법으로 불러 보고 가장 또렷한 걸 골라요. 반환: (오디오, 정보)"""
+    """
+    한 가지 방법으로 먼저 불러 보고, 음성 인식으로 줄마다 또렷함을 재요.
+    덜 또렷한 줄만 다른 방법(더 천천히 읽기, 다른 읽기 모델)으로 바꿔 보고 나아지면 그 줄을 바꿔요.
+    """
     groups: list[list[int]] = []
     k = 0
     for ls in line_syls:
@@ -230,29 +302,71 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
         pron += pronounce([orig[i] for i in g])
     pron_lines = ["".join(pron[i] for i in g) for g in groups]
 
-    # MeloTTS 가 있으면 먼저, 충분히 또렷하면(60% 이상) 거기서 끝내요. 아니면 MMS 로 한 번 더.
-    candidates = []
+    methods: list[tuple[str, object]] = []
     if melo_ready():
-        candidates.append(("melo", 0.85))
-    candidates.append(("mms", (0.8, 0.4)))
-    results = []
-    errors = []
-    for engine, opt in candidates:
-        try:
-            if engine == "melo":
-                audio = tts_melo(line_texts, opt)
-            else:
-                audio = [tts_mms(t, *opt) for t in pron_lines]
-            y = render(audio, groups, notes, pron, total, sr)
-            c = clarity(y, sr, orig, pron)
-            results.append((c if c is not None else (0.5 if engine == "melo" else 0.4), engine, opt, y))
-            print(f"[ttarasori] 가사 노래 후보 {engine} {opt}: 또렷함 {c}", flush=True)
-            if c is not None and c >= 0.6:
-                break  # 충분히 또렷하면 더 안 만들어요
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"{engine}: {type(e).__name__}: {e}"[:200])
-            print(f"[ttarasori] 가사 노래 후보 {engine} 실패: {e}", flush=True)
-    if not results:
-        raise RuntimeError("; ".join(errors) or "가사 노래를 만들지 못했어요")
-    best = max(results, key=lambda r: r[0])
-    return best[3], {"engine": best[1], "clarity": round(best[0], 3), "tried": len(results), "pron": "".join(pron), "errors": errors}
+        methods += [("melo", 0.85), ("melo", 0.7)]
+    methods += [("mms", (0.8, 0.4)), ("mms", (0.7, 0.33))]
+    errors: list[str] = []
+    cache: dict[tuple, tuple[np.ndarray, int] | None] = {}
+
+    def line_audio(m, li):
+        key = (m[0], str(m[1]), li)
+        if key not in cache:
+            try:
+                cache[key] = tts_melo_line(line_texts[li], m[1]) if m[0] == "melo" else tts_mms(pron_lines[li], *m[1])
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{m[0]}: {type(e).__name__}: {e}"[:200])
+                print(f"[ttarasori] 가사 줄 읽기 실패 {m}: {e}", flush=True)
+                cache[key] = None
+        return cache[key]
+
+    # 1) 기본 방법: 모든 줄을 읽을 수 있는 첫 방법
+    choice: list[tuple[str, object]] = []
+    for li in range(len(groups)):
+        for m in methods:
+            if line_audio(m, li) is not None:
+                choice.append(m)
+                break
+        else:
+            raise RuntimeError("; ".join(errors) or "가사 노래를 만들지 못했어요")
+
+    def build(ch):
+        return render([line_audio(m, li) for li, m in enumerate(ch)], groups, notes, pron, total, sr)
+
+    def line_score(y, li):
+        g = groups[li]
+        a = max(0, int((notes[g[0]]["start"] - 0.35) * sr))
+        b = min(len(y), int((notes[g[-1]]["start"] + notes[g[-1]]["dur"] + 0.35) * sr))
+        h = _heard(y[a:b], sr)
+        return None if h is None else _ratio([orig[i] for i in g], [pron[i] for i in g], h)
+
+    y = build(choice)
+    scores = [line_score(y, li) for li in range(len(groups))]
+    swaps = 0
+    # 2) 덜 또렷한 줄만 다른 방법으로
+    if all(s is not None for s in scores):
+        for li in range(len(groups)):
+            for m in methods:
+                if scores[li] >= LINE_GOOD:
+                    break
+                if m == choice[li] or line_audio(m, li) is None:
+                    continue
+                trial = choice[:li] + [m] + choice[li + 1:]
+                y2 = build(trial)
+                s2 = line_score(y2, li)
+                print(f"[ttarasori] 가사 {li + 1}줄 {choice[li]}→{m}: {scores[li]:.2f}→{s2}", flush=True)
+                if s2 is not None and s2 > scores[li] + 0.05:
+                    choice, y, scores[li] = trial, y2, s2
+                    swaps += 1
+    total_c = clarity(y, sr, orig, pron)
+    print(f"[ttarasori] 가사 노래 완성: 또렷함 {total_c}, 줄별 {scores}, 바꾼 줄 {swaps}", flush=True)
+    engines = sorted({m[0] for m in choice})
+    return y, {
+        "engine": "+".join(engines),
+        "clarity": round(total_c if total_c is not None else 0.5, 3),
+        "lines": [None if s is None else round(s, 3) for s in scores],
+        "tried": len({(k2[0], k2[1]) for k2 in cache}) or 1,
+        "swaps": swaps,
+        "pron": "".join(pron),
+        "errors": errors,
+    }
