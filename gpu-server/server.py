@@ -32,7 +32,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-SEED_VC_DIR = Path(os.environ.get("SEED_VC_DIR", "/root/seed-vc"))
+SEED_VC_DIR = Path(os.environ.get("SEED_VC_DIR", "/opt/seed-vc"))
 WORK_DIR = Path(os.environ.get("WORK_DIR", "/tmp/ttarasori-jobs"))
 SECRET = os.environ.get("SERVICE_SECRET", "")
 ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]

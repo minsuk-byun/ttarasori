@@ -54,18 +54,22 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 log "파이썬 패키지 설치 중"
-pip install -q --no-cache-dir -r "$HERE/requirements.txt"
+pip install -q --no-cache-dir -r "$HERE/requirements.txt" || log "파이썬 패키지 설치 실패: 로그를 확인해 주세요"
 # 가사 노래용 패키지는 따로 설치: 실패해도 서버는 '라'로 부르며 정상 동작
 pip install -q --no-cache-dir pyworld==0.3.4 uroman || log "가사 노래 패키지 설치 실패 (가사 없이 동작)"
 
-if [ ! -d /root/seed-vc ]; then
+# 큰 파일(모델·캐시)은 /root 밖(/opt)에 둬요.
+# /root 는 Workspace 를 중지할 때 저장·복원되는데, 모델까지 들어가면 복원하다 디스크가 가득 차서 서버가 못 떠요.
+rm -rf /root/seed-vc /root/.cache/huggingface 2>/dev/null || true
+if [ ! -d /opt/seed-vc ]; then
   log "Seed-VC 내려받는 중"
-  git clone -q https://github.com/Plachtaa/seed-vc /root/seed-vc
-  git -C /root/seed-vc checkout -q "$SEED_VC_COMMIT"
+  git clone -q https://github.com/Plachtaa/seed-vc /opt/seed-vc
+  git -C /opt/seed-vc checkout -q "$SEED_VC_COMMIT"
 fi
 
-export SEED_VC_DIR=/root/seed-vc
-export HF_HOME="${HF_HOME:-/root/.cache/huggingface}"
+export SEED_VC_DIR=/opt/seed-vc
+export HF_HOME=/opt/hf-cache
+log "디스크 남은 용량: $(df -h /root | tail -1 | awk '{print $4}') (/root), $(df -h /opt | tail -1 | awk '{print $4}') (/opt)"
 cd "$HERE"
 log "서버 시작 (모델 로딩까지 몇 분 더 걸려요)"
 # 서버 메시지도 VESSL 로그 화면에 보이도록 컨테이너 표준 출력으로 보냄
