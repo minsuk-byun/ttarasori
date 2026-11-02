@@ -8,6 +8,8 @@ GET  /jobs/{id}/vocals  AI 보컬만 (wav, 비교 분석용)
 POST /practice          스타일 설명(+가사) → 새 연습곡
 POST /tune              내 녹음 + 목표 음 → 음정만 고친 내 목소리 교정본
 GET  /jobs/{id}/tuned   교정본 (mp3)
+POST /pronounce         내 녹음 (+ 가이드 보컬) → 음성 인식 결과 (발음 진단용)
+GET  /jobs/{id}/result  작업 결과 (json)
 
 인증: Vercel의 /api/cover/token 이 SERVICE_SECRET 으로 서명한 짧은 수명 토큰을
       Authorization: Bearer <token> 또는 ?t=<token> 으로 전달.
@@ -311,10 +313,33 @@ def run_tune(job_id: str):
     )
 
 
+def run_pronounce(job_id: str):
+    import pronounce
+
+    job = jobs[job_id]
+    d = Path(job["dir"])
+    result = {}
+    parts = [("mine", job["mine"])] + ([("guide", job["guide"])] if job.get("guide") else [])
+    for k, (name, src) in enumerate(parts):
+        set_step(job_id, "내 노래 알아듣는 중" if name == "mine" else "가이드 알아듣는 중", 0.1 + 0.8 * k / len(parts))
+        wav = d / f"{name}16k.wav"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", src, "-ac", "1", "-ar", "16000", str(wav)], check=True, capture_output=True)
+        x, _ = sf.read(str(wav), dtype="float32")
+        if len(x) > MAX_SONG_SEC * 16000:
+            raise ValueError("녹음이 너무 길어요. 8분 이하로 올려 주세요.")
+        result[name] = pronounce.transcribe(x, 16000)
+    (d / "result.json").write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+
+
 def run_job(job_id: str):
     job = jobs[job_id]
     d = Path(job["dir"])
     try:
+        if job.get("kind") == "pronounce":
+            job["status"] = "running"
+            run_pronounce(job_id)
+            job.update(status="done", step="완료", progress=1.0)
+            return
         if job.get("kind") == "tune":
             job["status"] = "running"
             run_tune(job_id)
@@ -341,7 +366,7 @@ def run_job(job_id: str):
     except subprocess.CalledProcessError as e:
         job.update(status="error", error="음원 처리 중 오류가 났어요.", detail=(e.stderr or b"")[-2000:].decode(errors="ignore"))
     except Exception as e:  # noqa: BLE001
-        what = {"practice": "연습곡을", "tune": "교정본을"}.get(job.get("kind") or "", "AI 커버를")
+        what = {"practice": "연습곡을", "tune": "교정본을", "pronounce": "발음 진단을"}.get(job.get("kind") or "", "AI 커버를")
         job.update(status="error", error=f"{what} 만들지 못했어요.", detail="".join(traceback.format_exception(e))[-2000:])
 
 
@@ -385,6 +410,13 @@ def startup():
                     print("[ttarasori] 가사 노래 모델 로딩 실패:\n" + traceback.format_exc()[-1500:], flush=True)
             else:
                 print("[ttarasori] 가사 노래 패키지(pyworld)가 없어 '라'로만 불러요", flush=True)
+            try:
+                import pronounce
+
+                pronounce.get_asr()
+                print("[ttarasori] 발음 진단 모델 준비 완료", flush=True)
+            except Exception:  # noqa: BLE001
+                print("[ttarasori] 발음 진단 모델 로딩 실패:\n" + traceback.format_exc()[-1500:], flush=True)
         except Exception:  # noqa: BLE001
             traceback.print_exc()
 
@@ -397,6 +429,15 @@ def _lyrics_ready() -> bool:
         import sing
 
         return sing.ready() and sing._tts is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _pronounce_ready() -> bool:
+    try:
+        import pronounce
+
+        return pronounce.ready()
     except Exception:  # noqa: BLE001
         return False
 
@@ -419,6 +460,7 @@ def health():
         "practice_ready": musicgen is not None,
         "lyrics_ready": _lyrics_ready(),
         "tune_ready": _tune_ready(),
+        "pronounce_ready": _pronounce_ready(),
         "queue": queue.qsize(),
         "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
     }
@@ -602,3 +644,39 @@ async def create_tune(
 @app.get("/jobs/{job_id}/tuned")
 def job_tuned(job_id: str, request: Request):
     return job_file(job_id, request, "tuned.mp3", "audio/mpeg")
+
+
+@app.post("/pronounce")
+async def create_pronounce(
+    request: Request,
+    mine: UploadFile = File(...),
+    guide: UploadFile | None = File(None),
+):
+    """발음 진단: 내 녹음(필수)과 가이드 보컬(가사를 모를 때)을 음성 인식"""
+    verify(token_from(request))
+    job_id = uuid.uuid4().hex[:12]
+    d = WORK_DIR / job_id
+    d.mkdir()
+    mine_path = d / f"upload_mine{Path(mine.filename or '').suffix or '.webm'}"
+    await save_upload(mine, mine_path)
+    guide_path = None
+    if guide is not None and guide.filename:
+        guide_path = d / f"upload_guide{Path(guide.filename).suffix or '.mp3'}"
+        await save_upload(guide, guide_path)
+    jobs[job_id] = {
+        "kind": "pronounce",
+        "status": "queued",
+        "step": "대기 중",
+        "progress": 0.0,
+        "dir": str(d),
+        "mine": str(mine_path),
+        "guide": str(guide_path) if guide_path else None,
+        "created": time.time(),
+    }
+    queue.put(job_id)
+    return {"id": job_id, "position": queue.qsize()}
+
+
+@app.get("/jobs/{job_id}/result")
+def job_result(job_id: str, request: Request):
+    return job_file(job_id, request, "result.json", "application/json")

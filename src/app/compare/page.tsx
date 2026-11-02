@@ -12,6 +12,9 @@ import { decodeToMono } from "@/lib/audio/decode.ts";
 import { extractFeatures, type Features } from "@/lib/audio/features.ts";
 import { analyzeNotes, autoNotes, type NoteResult } from "@/lib/audio/notes.ts";
 import { usePlayer, type Player } from "@/lib/usePlayer";
+import CoachPanel from "@/components/CoachPanel";
+import { coach as runCoach, type Coach } from "@/lib/audio/coach.ts";
+import { extractTimbre } from "@/lib/audio/timbre.ts";
 import { SAMPLE_RATE } from "@/lib/audio/synth.ts";
 import { getSample } from "@/lib/samples";
 import { saveToLibrary } from "@/lib/practiceLibrary";
@@ -26,6 +29,9 @@ interface Analysis {
   hasLyrics: boolean;
   /** 음만 듣기용 목표 음 */
   tones: { midi: number; start: number; dur: number }[];
+  /** 글자(음) 목록 — 연습곡이면 가사 글자 */
+  noteList: NoteInfo[];
+  coach: Coach;
 }
 
 type Status = { kind: "idle" } | { kind: "working"; step: string; p: number } | { kind: "error"; msg: string };
@@ -72,7 +78,16 @@ export default function ComparePage() {
       const noteList = given ?? autoNotes(c.refMidi, c.hopSec);
       const hasLyrics = !!given && given.some((n) => n.syllable && n.syllable !== "라" && n.syllable !== "아");
       const noteResults = analyzeNotes(c, noteList);
-      setResult({ c, ref: gf, notes: noteResults, hasLyrics, tones: noteList });
+      // 호흡·강약·발성 코칭 (발성은 같은 음색끼리 비교하려고 소리의 밝기·숨 섞임을 따로 계산)
+      setStatus({ kind: "working", step: "발성·호흡 살펴보는 중", p: 0.98 });
+      let coachResult: Coach;
+      try {
+        const [gt, ut] = await Promise.all([extractTimbre(gx, SAMPLE_RATE, gf.hopSec), extractTimbre(mx, SAMPLE_RATE, mf.hopSec)]);
+        coachResult = runCoach(c, noteList, hasLyrics, gt, ut);
+      } catch {
+        coachResult = runCoach(c, noteList, hasLyrics, null, null);
+      }
+      setResult({ c, ref: gf, notes: noteResults, hasLyrics, tones: noteList, noteList, coach: coachResult });
       // 연습 기록과 '다시 연습할 구절' 저장 (샘플 체험은 빼요)
       if (g.origin !== "sample") void saveProgress(g, c, noteResults, noteList, hasLyrics, gx, mx.length / SAMPLE_RATE);
       setStatus({ kind: "idle" });
@@ -357,6 +372,8 @@ function Results({ analysis, guide, mine, backing }: { analysis: Analysis; guide
         hasTuned={!!tuned}
         range={seg ? [seg.start, seg.end] : undefined}
       />
+
+      <CoachPanel coach={analysis.coach} notes={analysis.noteList} hasLyrics={analysis.hasLyrics} player={player} guideBlob={guide.blob} mineBlob={mine.blob} />
     </div>
   );
 }

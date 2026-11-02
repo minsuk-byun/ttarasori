@@ -183,3 +183,40 @@ export function createTuneJob(
     xhr.send(fd);
   });
 }
+
+export interface Transcript {
+  text: string;
+  chunks: { text: string; start: number | null; end: number | null }[];
+}
+
+/** 발음 진단: 내 녹음(필수)과 가이드 보컬(가사를 모를 때)을 음성 인식 */
+export function createPronounceJob(cfg: GpuConfig, mine: Blob, guide: Blob | null, onUpload: (p: number) => void): Promise<string> {
+  const ext = (b: Blob) => (b.type.includes("mpeg") ? "mp3" : b.type.includes("wav") ? "wave" : b.type.includes("mp4") ? "m4a" : "webm");
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("mine", mine, `mine.${ext(mine)}`);
+    if (guide) fd.append("guide", guide, `guide.${ext(guide)}`);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${cfg.url}/pronounce`);
+    xhr.setRequestHeader("Authorization", `Bearer ${cfg.token}`);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onUpload(e.loaded / e.total);
+    xhr.onload = () => {
+      try {
+        const body = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body.id);
+        else if (xhr.status === 404) reject(new Error("GPU 서버가 아직 발음 진단 기능을 모르는 버전이에요. 서버를 새로 시작해야 해요."));
+        else reject(new Error(body.detail ?? "발음 진단 요청이 거절됐어요."));
+      } catch {
+        reject(new Error(`GPU 서버 응답을 읽지 못했어요 (HTTP ${xhr.status}).`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("GPU 서버에 연결하지 못했어요. VESSL 서버가 켜져 있는지 확인해 주세요."));
+    xhr.send(fd);
+  });
+}
+
+export async function getPronounceResult(cfg: GpuConfig, id: string): Promise<{ mine: Transcript; guide?: Transcript }> {
+  const r = await fetch(`${cfg.url}/jobs/${id}/result`, { headers: { Authorization: `Bearer ${cfg.token}` } });
+  if (!r.ok) throw new Error("발음 진단 결과를 불러오지 못했어요.");
+  return r.json();
+}
