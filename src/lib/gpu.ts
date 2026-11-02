@@ -143,6 +143,8 @@ export interface PracticeNotes {
   tonic: number;
   lyrics?: boolean;
   sung?: boolean;
+  /** 가사 노래 정보: 쓴 읽기 모델, 음성 인식으로 잰 또렷함(0~1) */
+  sing_info?: { engine: string; clarity: number; tried: number; pron: string } | null;
 }
 
 export async function getNotes(cfg: GpuConfig, id: string): Promise<PracticeNotes> {

@@ -481,6 +481,15 @@ export default function PracticePage() {
               {gen.notes?.lyrics && (
                 <Karaoke notes={gen.notes} audio={audioRef} sung={!!gen.notes.sung} />
               )}
+              {gen.notes?.sing_info && (
+                <p className="mt-2 text-sm text-white/70">
+                  가이드 발음 또렷함{" "}
+                  <b className={gen.notes.sing_info.clarity >= 0.7 ? "text-[#7ee0b5]" : gen.notes.sing_info.clarity >= 0.45 ? "text-[#f5c542]" : "text-[#ff8a8a]"}>
+                    {Math.round(gen.notes.sing_info.clarity * 100)}%
+                  </b>{" "}
+                  (음성 인식이 알아들은 비율, {gen.notes.sing_info.tried}가지 방법 중 가장 또렷한 걸 골랐어요)
+                </p>
+              )}
               {roll && (
                 <div className="mt-4 rounded-xl bg-surface p-3 text-ink">
                   <div className="mb-1 text-sm font-semibold">따라 부를 멜로디</div>

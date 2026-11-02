@@ -70,6 +70,26 @@ log "파이썬 패키지 설치 중"
 pip install -q --no-cache-dir -r "$HERE/requirements.txt" || log "파이썬 패키지 설치 실패: 로그를 확인해 주세요"
 # 가사 노래용 패키지는 따로 설치: 실패해도 서버는 '라'로 부르며 정상 동작
 pip install -q --no-cache-dir pyworld==0.3.4 uroman || log "가사 노래 패키지 설치 실패 (가사 없이 동작)"
+# 가사 정렬(MMS_FA)용 torchaudio — 이미지에 없으면 torch 와 같은 버전으로
+python3 -c "import torchaudio" 2>/dev/null || pip install -q --no-cache-dir "torchaudio==$(python3 -c 'import torch;print(torch.__version__.split("+")[0])')" || log "torchaudio 설치 실패"
+# MeloTTS(한국어 읽기, MIT)는 패키지 버전이 달라 따로 가상환경에 설치. 서버 시작을 늦추지 않게 뒤에서 진행해요.
+if [ ! -f /opt/melo-ok ]; then
+  (
+    log "MeloTTS 설치 시작 (뒤에서 진행)"
+    if timeout 1200 bash -c '
+      python3 -m venv --system-site-packages /opt/melo-venv &&
+      /opt/melo-venv/bin/pip install -q --no-cache-dir git+https://github.com/myshell-ai/MeloTTS.git &&
+      /opt/melo-venv/bin/python -m unidic download &&
+      cd /tmp && echo "{\"lines\":[\"안녕하세요\"],\"speed\":1.0,\"out\":\"/tmp\"}" > /tmp/melo-test.json &&
+      /opt/melo-venv/bin/python '"$HERE"'/melo_tts.py /tmp/melo-test.json
+    ' > /opt/melo-install.log 2>&1; then
+      touch /opt/melo-ok
+      log "MeloTTS 준비 완료"
+    else
+      log "MeloTTS 설치 실패 (MMS 로 대신 불러요): $(tail -3 /opt/melo-install.log | tr '\n' ' ')"
+    fi
+  ) &
+fi
 
 # 큰 파일(모델·캐시)은 /root 밖(/opt)에 둬요.
 # /root 는 Workspace 를 중지할 때 저장·복원되는데, 모델까지 들어가면 복원하다 디스크가 가득 차서 서버가 못 떠요.

@@ -232,15 +232,33 @@ def run_practice(job_id: str):
     # 가사가 있으면 글자마다 발음을 만들어 노래로 이어 붙이기 (실패하면 '라'로 부른 멜로디 사용)
     sung = False
     sing_error = None
+    sing_info = None
     guide_src = melody44
     if syls:
         set_step(job_id, "가사로 노래 만들기", 0.1)
+        # 줄 나눔: 가사 줄마다 글자 수 (전체 글자 수 제한에 맞춰 자름)
+        line_texts, line_syls, used = [], [], 0
+        for line in (job.get("lyrics") or "").split("\n"):
+            ls = sing.syllables(line)[: max(0, len(syls) - used)]
+            if ls:
+                line_texts.append(line.strip())
+                line_syls.append(ls)
+                used += len(ls)
         try:
-            guide_src = sing.sing(notes, total, SR)
+            import sing2
+
+            # v2: 문장 단위 합성 + 글자 정렬 + 또렷함 검사
+            guide_src, sing_info = sing2.sing_best(notes, total, SR, line_syls, line_texts)
             sung = True
         except Exception as e:  # noqa: BLE001
-            sing_error = f"{type(e).__name__}: {e}"[:300]
-            print("[ttarasori] 가사 노래 실패:\n" + traceback.format_exc()[-1500:], flush=True)
+            print("[ttarasori] 가사 노래 v2 실패, 예전 방식으로:\n" + traceback.format_exc()[-1500:], flush=True)
+            sing_error = f"v2 {type(e).__name__}: {e}"[:200]
+            try:
+                guide_src = sing.sing(notes, total, SR)
+                sung = True
+            except Exception as e2:  # noqa: BLE001
+                sing_error += f" / {type(e2).__name__}: {e2}"[:200]
+                print("[ttarasori] 가사 노래 실패:\n" + traceback.format_exc()[-1500:], flush=True)
     sf.write(d / "melody.wav", guide_src, SR)
     (d / "notes.json").write_text(
         json.dumps(
@@ -252,6 +270,7 @@ def run_practice(job_id: str):
                 "lyrics": bool(syls),
                 "sung": sung,
                 "sing_error": sing_error,
+                "sing_info": sing_info,
             },
             ensure_ascii=False,
         ),
@@ -411,6 +430,13 @@ def startup():
             else:
                 print("[ttarasori] 가사 노래 패키지(pyworld)가 없어 '라'로만 불러요", flush=True)
             try:
+                import sing2
+
+                sing2._get_fa()
+                print("[ttarasori] 가사 정렬 모델 준비 완료", flush=True)
+            except Exception:  # noqa: BLE001
+                print("[ttarasori] 가사 정렬 모델 로딩 실패:\n" + traceback.format_exc()[-1500:], flush=True)
+            try:
                 import pronounce
 
                 pronounce.get_asr()
@@ -461,6 +487,7 @@ def health():
         "lyrics_ready": _lyrics_ready(),
         "tune_ready": _tune_ready(),
         "pronounce_ready": _pronounce_ready(),
+        "melo_ready": os.path.exists("/opt/melo-ok"),
         "queue": queue.qsize(),
         "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
     }
