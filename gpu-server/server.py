@@ -580,7 +580,8 @@ async def create_tune(
     job_id = uuid.uuid4().hex[:12]
     d = WORK_DIR / job_id
     d.mkdir()
-    mine_path = d / f"mine{Path(mine.filename or '').suffix or '.webm'}"
+    # 변환본(mine.wav)과 이름이 겹치지 않게 원본은 upload.* 로 저장
+    mine_path = d / f"upload{Path(mine.filename or '').suffix or '.webm'}"
     await save_upload(mine, mine_path)
     (d / "target.json").write_text(json.dumps({"hop": hop, "midi": midi}), encoding="utf-8")
     jobs[job_id] = {

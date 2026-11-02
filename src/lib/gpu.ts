@@ -160,7 +160,9 @@ export function createTuneJob(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
-    const ext = mine.type.includes("mpeg") ? "mp3" : mine.type.includes("wav") ? "wav" : mine.type.includes("mp4") ? "m4a" : "webm";
+    // 예전 서버는 업로드를 mine.<확장자> 로 저장한 뒤 mine.wav 로 변환해서, .wav 로 보내면 이름이 겹쳐 실패했어요.
+    // 서버가 내용을 보고 형식을 알아내므로 wav 는 .wave 로 보내요.
+    const ext = mine.type.includes("mpeg") ? "mp3" : mine.type.includes("wav") ? "wave" : mine.type.includes("mp4") ? "m4a" : "webm";
     fd.append("mine", mine, `mine.${ext}`);
     fd.append("target", JSON.stringify({ hop: target.hop, midi: target.midi.map((v) => (v == null ? null : Math.round(v * 100) / 100)) }));
     const xhr = new XMLHttpRequest();
