@@ -249,7 +249,8 @@ def run_practice(job_id: str):
                 "sing_error": sing_error,
             },
             ensure_ascii=False,
-        )
+        ),
+        encoding="utf-8",
     )
 
     set_step(job_id, "반주 만들기", 0.15)

@@ -67,6 +67,8 @@ if [ ! -d /opt/seed-vc ]; then
   git -C /opt/seed-vc checkout -q "$SEED_VC_COMMIT"
 fi
 
+# 컨테이너 기본 인코딩이 ASCII 라서 한글 가사를 파일에 쓰다 실패했던 문제 방지
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8 LANG=C.UTF-8 LC_ALL=C.UTF-8
 export SEED_VC_DIR=/opt/seed-vc
 export HF_HOME=/opt/hf-cache
 log "디스크 남은 용량: $(df -h /root | tail -1 | awk '{print $4}') (/root), $(df -h /opt | tail -1 | awk '{print $4}') (/opt)"
