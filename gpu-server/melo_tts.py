@@ -23,7 +23,7 @@ def say(obj):
 
 
 if len(sys.argv) > 1 and sys.argv[1] == "--serve":
-    say({"ready": True})
+    say({"ready": True, "device": str(model.device) if hasattr(model, "device") else ("cuda" if torch.cuda.is_available() else "cpu")})
     for line in sys.stdin:
         line = line.strip()
         if not line:

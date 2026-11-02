@@ -73,7 +73,9 @@ def _melo_proc():
         text=True,
         bufsize=1,
     )
+    t1 = time.time()
     msg = _melo_read(_melo, 600)
+    print(f"[ttarasori] MeloTTS 작업자 시작 {time.time() - t1:.0f}초, 장치 {msg.get('device')}", flush=True)
     if not msg.get("ready"):
         raise RuntimeError("MeloTTS 작업자가 준비되지 않았어요")
     return _melo
@@ -168,7 +170,7 @@ def _has_jong(s: str) -> bool:
     return 0 <= c < 11172 and c % 28 != 0
 
 
-def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], notes: list[dict], pron: list[str], total: float, sr_out: int) -> np.ndarray:
+def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], notes: list[dict], pron: list[str], total: float, sr_out: int, memo: dict | None = None) -> np.ndarray:
     import librosa
     import pyworld as pw
 
@@ -185,25 +187,32 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
     for (x, sr), idxs in zip(lines_audio, groups):
         if not idxs:
             continue
-        if sr != SRW:
-            x = librosa.resample(x, orig_sr=sr, target_sr=SRW)
-        x = np.nan_to_num(x.astype(np.float64))
-        # 완전한 무음(0)이 있으면 분석값이 0 이 되어 합성 때 NaN 이 생겨요 → 아주 작은 잡음을 더해요
-        x = x + np.random.default_rng(0).standard_normal(len(x)) * 1e-6
-        starts = align(x, SRW, [pron[k] for k in idxs])
-        # dio+stonemask: harvest 보다 훨씬 빨라요 (읽기 음성이라 정확도도 충분)
-        f0, t = pw.dio(x, SRW, f0_floor=60, f0_ceil=600, frame_period=FRAME * 1000)
-        f0 = pw.stonemask(x, f0, t, SRW)
-        sp = np.maximum(np.nan_to_num(pw.cheaptrick(x, f0, t, SRW), nan=1e-12), 1e-12)
-        ap = np.clip(np.nan_to_num(pw.d4c(x, f0, t, SRW), nan=1.0), 0.0, 1.0)
-        f0 = np.nan_to_num(f0)
-        nf = len(f0)
-        # 마지막 글자는 목소리가 끝나는 곳까지
-        hop = int(SRW * FRAME)
-        rms = np.array([np.sqrt(np.mean(x[i * hop:(i + 1) * hop] ** 2) + 1e-12) if i * hop < len(x) else 0.0 for i in range(nf)])
-        loud = np.where(rms > max(1e-4, float(rms.max()) * 0.05))[0]
-        end_t = (loud[-1] + 2) * FRAME if len(loud) else nf * FRAME
-        segs = [(starts[j], starts[j + 1] if j + 1 < len(starts) else max(starts[j] + 0.1, end_t)) for j in range(len(starts))]
+        # 줄마다 분석(정렬·WORLD)은 한 번만: 다른 줄만 바꿔 다시 부를 때 이전 분석을 그대로 써요 (예전엔 매번 처음부터 해서 느렸어요)
+        mkey = (id(x), tuple(idxs))
+        if memo is not None and mkey in memo:
+            starts, f0, sp, ap, nf, segs = memo[mkey]
+        else:
+            if sr != SRW:
+                x = librosa.resample(x, orig_sr=sr, target_sr=SRW)
+            x = np.nan_to_num(x.astype(np.float64))
+            # 완전한 무음(0)이 있으면 분석값이 0 이 되어 합성 때 NaN 이 생겨요 → 아주 작은 잡음을 더해요
+            x = x + np.random.default_rng(0).standard_normal(len(x)) * 1e-6
+            starts = align(x, SRW, [pron[k] for k in idxs])
+            # dio+stonemask: harvest 보다 훨씬 빨라요 (읽기 음성이라 정확도도 충분)
+            f0, t = pw.dio(x, SRW, f0_floor=60, f0_ceil=600, frame_period=FRAME * 1000)
+            f0 = pw.stonemask(x, f0, t, SRW)
+            sp = np.maximum(np.nan_to_num(pw.cheaptrick(x, f0, t, SRW), nan=1e-12), 1e-12)
+            ap = np.clip(np.nan_to_num(pw.d4c(x, f0, t, SRW), nan=1.0), 0.0, 1.0)
+            f0 = np.nan_to_num(f0)
+            nf = len(f0)
+            # 마지막 글자는 목소리가 끝나는 곳까지
+            hop = int(SRW * FRAME)
+            rms = np.array([np.sqrt(np.mean(x[i * hop:(i + 1) * hop] ** 2) + 1e-12) if i * hop < len(x) else 0.0 for i in range(nf)])
+            loud = np.where(rms > max(1e-4, float(rms.max()) * 0.05))[0]
+            end_t = (loud[-1] + 2) * FRAME if len(loud) else nf * FRAME
+            segs = [(starts[j], starts[j + 1] if j + 1 < len(starts) else max(starts[j] + 0.1, end_t)) for j in range(len(starts))]
+            if memo is not None:
+                memo[mkey] = (starts, f0, sp, ap, nf, segs)
         for k, (s, e) in zip(idxs, segs):
             nt = notes[k]
             fs = int(s / FRAME)
@@ -310,12 +319,16 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
     methods += [("mms", (0.8, 0.4)), ("mms", (0.7, 0.33))]
     errors: list[str] = []
     cache: dict[tuple, tuple[np.ndarray, int] | None] = {}
+    memo: dict = {}
+    t0 = time.time()
 
     def line_audio(m, li):
         key = (m[0], str(m[1]), li)
         if key not in cache:
             try:
+                t1 = time.time()
                 cache[key] = tts_melo_line(line_texts[li], m[1]) if m[0] == "melo" else tts_mms(pron_lines[li], *m[1])
+                print(f"[ttarasori] 시간: {li + 1}줄 읽기 {m} {time.time() - t1:.1f}초", flush=True)
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{m[0]}: {type(e).__name__}: {e}"[:200])
                 print(f"[ttarasori] 가사 줄 읽기 실패 {m}: {e}", flush=True)
@@ -333,13 +346,19 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
             raise RuntimeError("; ".join(errors) or "가사 노래를 만들지 못했어요")
 
     def build(ch):
-        return render([line_audio(m, li) for li, m in enumerate(ch)], groups, notes, pron, total, sr)
+        t1 = time.time()
+        try:
+            return render([line_audio(m, li) for li, m in enumerate(ch)], groups, notes, pron, total, sr, memo)
+        finally:
+            print(f"[ttarasori] 시간: 노래 합성 {time.time() - t1:.1f}초", flush=True)
 
     def line_score(y, li):
         g = groups[li]
         a = max(0, int((notes[g[0]]["start"] - 0.35) * sr))
         b = min(len(y), int((notes[g[-1]]["start"] + notes[g[-1]]["dur"] + 0.35) * sr))
+        t1 = time.time()
         h = _heard(y[a:b], sr)
+        print(f"[ttarasori] 시간: {li + 1}줄 듣기 {time.time() - t1:.1f}초", flush=True)
         return None if h is None else _ratio([orig[i] for i in g], [pron[i] for i in g], h)
 
     y = build(choice)
@@ -361,7 +380,7 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
                     choice, y, scores[li] = trial, y2, s2
                     swaps += 1
     total_c = clarity(y, sr, orig, pron)
-    print(f"[ttarasori] 가사 노래 완성: 또렷함 {total_c}, 줄별 {scores}, 바꾼 줄 {swaps}", flush=True)
+    print(f"[ttarasori] 가사 노래 완성: 또렷함 {total_c}, 줄별 {scores}, 바꾼 줄 {swaps}, {time.time() - t0:.0f}초", flush=True)
     engines = sorted({m[0] for m in choice})
     return y, {
         "engine": "+".join(engines),
