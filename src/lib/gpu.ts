@@ -13,6 +13,7 @@ export interface JobStatus {
   step: string;
   progress: number;
   error?: string | null;
+  stats?: { fixed_ratio: number; mean_cents_before: number; mean_cents_after: number } | null;
 }
 
 export async function getGpuConfig(): Promise<GpuConfig> {
@@ -64,7 +65,7 @@ export async function getJob(cfg: GpuConfig, id: string): Promise<JobStatus> {
   return (await r.json()) as JobStatus;
 }
 
-export const resultUrl = (cfg: GpuConfig, id: string, kind: "mix" | "vocals") =>
+export const resultUrl = (cfg: GpuConfig, id: string, kind: "mix" | "vocals" | "tuned") =>
   `${cfg.url}/jobs/${id}/${kind}?t=${encodeURIComponent(cfg.token ?? "")}`;
 
 /**
@@ -148,4 +149,35 @@ export async function getNotes(cfg: GpuConfig, id: string): Promise<PracticeNote
   const r = await fetch(`${cfg.url}/jobs/${id}/notes`, { headers: { Authorization: `Bearer ${cfg.token}` } });
   if (!r.ok) throw new Error("멜로디 정보를 불러오지 못했어요.");
   return (await r.json()) as PracticeNotes;
+}
+
+/** 내 녹음의 음정만 고친 교정본 만들기. target.midi 는 내 녹음 시간축 기준 목표 음 */
+export function createTuneJob(
+  cfg: GpuConfig,
+  mine: Blob,
+  target: { hop: number; midi: (number | null)[] },
+  onUpload: (p: number) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    const ext = mine.type.includes("mpeg") ? "mp3" : mine.type.includes("wav") ? "wav" : mine.type.includes("mp4") ? "m4a" : "webm";
+    fd.append("mine", mine, `mine.${ext}`);
+    fd.append("target", JSON.stringify({ hop: target.hop, midi: target.midi.map((v) => (v == null ? null : Math.round(v * 100) / 100)) }));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${cfg.url}/tune`);
+    xhr.setRequestHeader("Authorization", `Bearer ${cfg.token}`);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onUpload(e.loaded / e.total);
+    xhr.onload = () => {
+      try {
+        const body = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body.id);
+        else if (xhr.status === 404) reject(new Error("GPU 서버가 아직 교정본 기능을 모르는 버전이에요. 서버를 새로 시작해야 해요."));
+        else reject(new Error(body.detail ?? "교정본 요청이 거절됐어요."));
+      } catch {
+        reject(new Error(`GPU 서버 응답을 읽지 못했어요 (HTTP ${xhr.status}).`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("GPU 서버에 연결하지 못했어요. VESSL 서버가 켜져 있는지 확인해 주세요."));
+    xhr.send(fd);
+  });
 }

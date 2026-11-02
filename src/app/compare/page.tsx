@@ -4,13 +4,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
 import LibraryPicker from "@/components/LibraryPicker";
 import { DeviationChart, PianoRoll, scoreColor } from "@/components/Charts";
+import NoteFeedback from "@/components/NoteFeedback";
+import RepeatPractice from "@/components/RepeatPractice";
+import TunedVersion from "@/components/TunedVersion";
 import { compareFeatures, fmtTime, type Comparison, type Issue, type Segment } from "@/lib/audio/compare.ts";
 import { decodeToMono } from "@/lib/audio/decode.ts";
-import { extractFeatures } from "@/lib/audio/features.ts";
+import { extractFeatures, type Features } from "@/lib/audio/features.ts";
+import { analyzeNotes, autoNotes, type NoteResult } from "@/lib/audio/notes.ts";
+import { usePlayer, type Player } from "@/lib/usePlayer";
 import { SAMPLE_RATE } from "@/lib/audio/synth.ts";
 import { getSample } from "@/lib/samples";
 import { saveToLibrary } from "@/lib/practiceLibrary";
 import { takePendingGuide, type AudioSource } from "@/lib/store";
+
+interface Analysis {
+  c: Comparison;
+  ref: Features;
+  notes: NoteResult[];
+  hasLyrics: boolean;
+  /** 음만 듣기용 목표 음 */
+  tones: { midi: number; start: number; dur: number }[];
+}
 
 type Status = { kind: "idle" } | { kind: "working"; step: string; p: number } | { kind: "error"; msg: string };
 
@@ -20,7 +34,7 @@ export default function ComparePage() {
   const [playAlong, setPlayAlong] = useState<AudioSource | null>(null);
   const [libFor, setLibFor] = useState<"guide" | "mine" | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [result, setResult] = useState<Comparison | null>(null);
+  const [result, setResult] = useState<Analysis | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,7 +65,11 @@ export default function ComparePage() {
       if (!c.segments.length) {
         throw new Error("AI 커버에서 노래 부분을 찾지 못했어요. 반주 없이 보컬만 있는 음원을 올리면 가장 정확해요.");
       }
-      setResult(c);
+      // 글자(음)별 피드백: 연습곡이면 서버가 준 글자·음표, 아니면 가이드 음정에서 음표를 자동으로 나눔
+      const given = g.notes?.length ? g.notes : null;
+      const noteList = given ?? autoNotes(c.refMidi, c.hopSec);
+      const hasLyrics = !!given && given.some((n) => n.syllable && n.syllable !== "라" && n.syllable !== "아");
+      setResult({ c, ref: gf, notes: analyzeNotes(c, noteList), hasLyrics, tones: noteList });
       setStatus({ kind: "idle" });
       // 직접 녹음하거나 올린 내 노래는 다음에 다시 고를 수 있게 브라우저에 저장
       if (m.origin === "record" || m.origin === "file") {
@@ -97,8 +115,8 @@ export default function ComparePage() {
             empty="아직 저장된 AI 커버나 연습곡이 없어요. AI 커버나 연습곡을 만들면 자동으로 저장돼요."
             onPick={(it) => {
               // 비교 기준은 반주 없는 보컬이 정확하고, 녹음할 때는 반주가 있는 완성곡을 틀어 줘요
-              setGuide({ name: `${it.title} (보컬)`, blob: it.vocals ?? it.mix, origin: "library" });
-              setPlayAlong(it.vocals ? { name: it.title, blob: it.mix, origin: "library" } : null);
+              setGuide({ name: `${it.title} (보컬)`, blob: it.vocals ?? it.mix, origin: "library", notes: it.notes ?? null });
+              setPlayAlong(it.vocals ? { name: it.title, blob: it.mix, origin: "library", notes: it.notes ?? null } : null);
               setLibFor(null);
             }}
           />
@@ -169,7 +187,7 @@ export default function ComparePage() {
 
       {result && guide && mine && (
         <div ref={resultRef} className="scroll-mt-6">
-          <Results result={result} guide={guide} mine={mine} />
+          <Results analysis={result} guide={guide} mine={mine} backing={(playAlong ?? guide).blob} />
         </div>
       )}
     </main>
@@ -178,76 +196,12 @@ export default function ComparePage() {
 
 /* ------------------------------------------------------------------ */
 
-function usePlayer(guide: AudioSource, mine: AudioSource, lagSec: number) {
-  const g = useRef<HTMLAudioElement | null>(null);
-  const m = useRef<HTMLAudioElement | null>(null);
-  const [playing, setPlaying] = useState<"guide" | "mine" | null>(null);
-  const [head, setHead] = useState<number | null>(null);
-  const raf = useRef(0);
-  const queue = useRef<(() => void) | null>(null);
-
-  useEffect(() => {
-    const gu = URL.createObjectURL(guide.blob);
-    const mu = URL.createObjectURL(mine.blob);
-    g.current = new Audio(gu);
-    m.current = new Audio(mu);
-    return () => {
-      g.current?.pause();
-      m.current?.pause();
-      cancelAnimationFrame(raf.current);
-      URL.revokeObjectURL(gu);
-      URL.revokeObjectURL(mu);
-    };
-  }, [guide, mine]);
-
-  const stop = useCallback(() => {
-    g.current?.pause();
-    m.current?.pause();
-    cancelAnimationFrame(raf.current);
-    queue.current = null;
-    setPlaying(null);
-    setHead(null);
-  }, []);
-
-  const play = useCallback(
-    (which: "guide" | "mine", start: number, end: number, then?: () => void) => {
-      g.current?.pause();
-      m.current?.pause();
-      cancelAnimationFrame(raf.current);
-      const a = which === "guide" ? g.current : m.current;
-      if (!a) return;
-      const off = which === "mine" ? lagSec : 0;
-      a.currentTime = Math.max(0, start + off);
-      a.play();
-      setPlaying(which);
-      queue.current = then ?? null;
-      const tick = () => {
-        const t = a.currentTime - off;
-        setHead(t);
-        if (t >= end || a.ended) {
-          a.pause();
-          const next = queue.current;
-          queue.current = null;
-          if (next) next();
-          else {
-            setPlaying(null);
-            setHead(null);
-          }
-          return;
-        }
-        raf.current = requestAnimationFrame(tick);
-      };
-      raf.current = requestAnimationFrame(tick);
-    },
-    [lagSec],
-  );
-
-  return { play, stop, playing, head };
-}
-
-function Results({ result, guide, mine }: { result: Comparison; guide: AudioSource; mine: AudioSource }) {
+function Results({ analysis, guide, mine, backing }: { analysis: Analysis; guide: AudioSource; mine: AudioSource; backing: Blob }) {
+  const result = analysis.c;
   const [sel, setSel] = useState<number | null>(null);
-  const player = usePlayer(guide, mine, result.lagSec);
+  const [tuned, setTuned] = useState<Blob | null>(null);
+  const sources = useMemo(() => ({ guide: guide.blob, mine: mine.blob, tuned }), [guide.blob, mine.blob, tuned]);
+  const player = usePlayer(sources, result.lagSec);
   const seg = sel != null ? result.segments[sel] : null;
   const range: [number, number] | undefined = seg
     ? [Math.max(0, seg.start - 0.6), Math.min(result.duration, seg.end + 0.6)]
@@ -277,6 +231,8 @@ function Results({ result, guide, mine }: { result: Comparison; guide: AudioSour
           ))}
         </ul>
       </section>
+
+      <TunedVersion result={result} mine={mine.blob} onReady={setTuned} />
 
       {/* 음정 곡선 */}
       <section className="rounded-2xl bg-surface p-4 sm:p-6">
@@ -314,7 +270,22 @@ function Results({ result, guide, mine }: { result: Comparison; guide: AudioSour
 
       {/* 구간 상세 */}
       {seg ? (
-        <SegmentDetail seg={seg} total={result.segments.length} player={player} onNav={setSel} />
+        <SegmentDetail
+          seg={seg}
+          total={result.segments.length}
+          player={player}
+          onNav={setSel}
+          hasTuned={!!tuned}
+          practice={
+            <RepeatPractice
+              seg={seg}
+              refFeatures={analysis.ref}
+              backing={backing}
+              tones={analysis.tones.filter((t) => t.start + t.dur > seg.start - 0.5 && t.start < seg.end + 0.5)}
+              player={player}
+            />
+          }
+        />
       ) : (
         <section className="rounded-2xl bg-surface p-4 sm:p-6">
           <h2 className="text-xl font-semibold">먼저 연습할 구간</h2>
@@ -339,6 +310,14 @@ function Results({ result, guide, mine }: { result: Comparison; guide: AudioSour
           </div>
         </section>
       )}
+
+      <NoteFeedback
+        notes={analysis.notes}
+        hasLyrics={analysis.hasLyrics}
+        player={player}
+        hasTuned={!!tuned}
+        range={seg ? [seg.start, seg.end] : undefined}
+      />
     </div>
   );
 }
@@ -375,11 +354,15 @@ function SegmentDetail({
   total,
   player,
   onNav,
+  hasTuned,
+  practice,
 }: {
   seg: Segment;
   total: number;
-  player: ReturnType<typeof usePlayer>;
+  player: Player;
   onNav: (i: number) => void;
+  hasTuned: boolean;
+  practice: React.ReactNode;
 }) {
   const { play, stop, playing } = player;
   return (
@@ -416,11 +399,22 @@ function SegmentDetail({
         <PlayBtn active={playing === "mine"} tone="mine" onClick={() => (playing ? stop() : play("mine", seg.start, seg.end))}>
           내 노래 듣기
         </PlayBtn>
+        {hasTuned && (
+          <PlayBtn active={playing === "tuned"} tone="good" onClick={() => (playing ? stop() : play("tuned", seg.start, seg.end))}>
+            교정본 듣기
+          </PlayBtn>
+        )}
         <button
-          onClick={() => (playing ? stop() : play("guide", seg.start, seg.end, () => play("mine", seg.start, seg.end)))}
+          onClick={() =>
+            playing
+              ? stop()
+              : hasTuned
+                ? play("mine", seg.start, seg.end, { then: () => play("tuned", seg.start, seg.end) })
+                : play("guide", seg.start, seg.end, { then: () => play("mine", seg.start, seg.end) })
+          }
           className="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:border-ink"
         >
-          {playing ? "멈추기" : "번갈아 듣기"}
+          {playing ? "멈추기" : hasTuned ? "내 노래 → 교정본" : "번갈아 듣기"}
         </button>
       </div>
 
@@ -429,6 +423,8 @@ function SegmentDetail({
           <IssueRow key={is.kind} issue={is} />
         ))}
       </ul>
+
+      {practice}
     </section>
   );
 }
@@ -459,11 +455,11 @@ function PlayBtn({
   children,
 }: {
   active: boolean;
-  tone: "guide" | "mine";
+  tone: "guide" | "mine" | "good";
   onClick: () => void;
   children: React.ReactNode;
 }) {
-  const base = tone === "guide" ? "bg-guide" : "bg-mine";
+  const base = tone === "guide" ? "bg-guide" : tone === "mine" ? "bg-mine" : "bg-good";
   return (
     <button onClick={onClick} className={`flex items-center gap-2 rounded-lg ${base} px-4 py-2 text-sm font-semibold text-white hover:brightness-110`}>
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>

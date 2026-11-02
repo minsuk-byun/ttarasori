@@ -8,6 +8,8 @@
  * 서버 파일은 2시간 뒤 지워지지만 여기 저장해 두면 다시 고를 수 있어요.
  */
 
+import type { NoteInfo } from "@/lib/audio/notes.ts";
+
 export type LibraryKind = "practice" | "cover" | "mine";
 
 export interface LibraryItem {
@@ -17,6 +19,8 @@ export interface LibraryItem {
   createdAt: number;
   mix: Blob;
   vocals: Blob | null;
+  /** 연습곡의 글자별 음표 (글자별 피드백용, 예전 항목에는 없음) */
+  notes?: NoteInfo[] | null;
 }
 
 /** 예전 이름 호환 */
@@ -97,7 +101,7 @@ export async function deleteFromLibrary(id: string): Promise<void> {
 
 // 연습곡 전용 (기존 호출부 호환)
 export const listPracticeSongs = () => listLibrary(["practice"]);
-export const savePracticeSong = (s: { title: string; mix: Blob; vocals: Blob | null }) => saveToLibrary({ ...s, kind: "practice" });
+export const savePracticeSong = (s: { title: string; mix: Blob; vocals: Blob | null; notes?: NoteInfo[] | null }) => saveToLibrary({ ...s, kind: "practice" });
 export const deletePracticeSong = deleteFromLibrary;
 
 export const KIND_LABEL: Record<LibraryKind, string> = { practice: "연습곡", cover: "AI 커버", mine: "내 녹음" };

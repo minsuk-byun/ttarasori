@@ -5,6 +5,9 @@ POST /jobs              원곡 + 목소리 샘플 + 키 → 작업 ID
 GET  /jobs/{id}         진행 상태
 GET  /jobs/{id}/mix     완성된 AI 커버 (반주 포함, mp3)
 GET  /jobs/{id}/vocals  AI 보컬만 (wav, 비교 분석용)
+POST /practice          스타일 설명(+가사) → 새 연습곡
+POST /tune              내 녹음 + 목표 음 → 음정만 고친 내 목소리 교정본
+GET  /jobs/{id}/tuned   교정본 (mp3)
 
 인증: Vercel의 /api/cover/token 이 SERVICE_SECRET 으로 서명한 짧은 수명 토큰을
       Authorization: Bearer <token> 또는 ?t=<token> 으로 전달.
@@ -280,10 +283,43 @@ def run_practice(job_id: str):
     write_outputs(d, vocal.astype(np.float32), backing, backing_gain=1.0)
 
 
+def run_tune(job_id: str):
+    import tune
+
+    job = jobs[job_id]
+    d = Path(job["dir"])
+    set_step(job_id, "녹음 읽는 중", 0.1)
+    wav = d / "mine.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", job["mine"], "-ac", "1", "-ar", "44100", str(wav)],
+        check=True,
+        capture_output=True,
+    )
+    x, sr = sf.read(str(wav), dtype="float32")
+    if len(x) > MAX_SONG_SEC * sr:
+        raise ValueError("녹음이 너무 길어요. 8분 이하로 올려 주세요.")
+    set_step(job_id, "음정 고치는 중", 0.3)
+    target = json.loads(Path(job["target"]).read_text(encoding="utf-8"))
+    y, stats = tune.tune(x, sr, float(target["hop"]), target["midi"], float(job.get("strength", 1.0)))
+    print(f"[ttarasori] tune {job_id}: {stats}", flush=True)
+    job["stats"] = stats
+    set_step(job_id, "저장하는 중", 0.9)
+    sf.write(d / "tuned.wav", y, sr)
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(d / "tuned.wav"), "-b:a", "192k", str(d / "tuned.mp3")],
+        check=True,
+    )
+
+
 def run_job(job_id: str):
     job = jobs[job_id]
     d = Path(job["dir"])
     try:
+        if job.get("kind") == "tune":
+            job["status"] = "running"
+            run_tune(job_id)
+            job.update(status="done", step="완료", progress=1.0)
+            return
         if job.get("kind") == "practice":
             job["status"] = "running"
             run_practice(job_id)
@@ -305,7 +341,7 @@ def run_job(job_id: str):
     except subprocess.CalledProcessError as e:
         job.update(status="error", error="음원 처리 중 오류가 났어요.", detail=(e.stderr or b"")[-2000:].decode(errors="ignore"))
     except Exception as e:  # noqa: BLE001
-        what = "연습곡을" if job.get("kind") == "practice" else "AI 커버를"
+        what = {"practice": "연습곡을", "tune": "교정본을"}.get(job.get("kind") or "", "AI 커버를")
         job.update(status="error", error=f"{what} 만들지 못했어요.", detail="".join(traceback.format_exception(e))[-2000:])
 
 
@@ -365,6 +401,15 @@ def _lyrics_ready() -> bool:
         return False
 
 
+def _tune_ready() -> bool:
+    try:
+        import pyworld  # noqa: F401
+
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @app.get("/health")
 def health():
     tunnel = Path("/root/tunnel-url.txt")
@@ -373,6 +418,7 @@ def health():
         "model_loaded": vc_model is not None,
         "practice_ready": musicgen is not None,
         "lyrics_ready": _lyrics_ready(),
+        "tune_ready": _tune_ready(),
         "queue": queue.qsize(),
         "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
     }
@@ -437,7 +483,7 @@ def job_status(job_id: str, request: Request):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "작업을 찾을 수 없어요.")
-    return {k: job.get(k) for k in ("status", "step", "progress", "error", "detail")}
+    return {k: job.get(k) for k in ("status", "step", "progress", "error", "detail", "stats")}
 
 
 def job_file(job_id: str, request: Request, name: str, media: str):
@@ -512,3 +558,46 @@ async def create_practice(
 @app.get("/jobs/{job_id}/notes")
 def job_notes(job_id: str, request: Request):
     return job_file(job_id, request, "notes.json", "application/json")
+
+
+@app.post("/tune")
+async def create_tune(
+    request: Request,
+    mine: UploadFile = File(...),
+    target: str = Form(...),
+    strength: float = Form(1.0),
+):
+    """내 녹음의 음정만 목표 음에 맞게 고치기. target = {"hop": 초, "midi": [목표 음 또는 null, ...]} (내 녹음 시간축)"""
+    verify(token_from(request))
+    try:
+        t = json.loads(target)
+        hop = float(t["hop"])
+        midi = t["midi"]
+        assert 0.005 <= hop <= 0.1 and isinstance(midi, list) and len(midi) * hop <= MAX_SONG_SEC + 30
+        assert all(v is None or (isinstance(v, (int, float)) and 20 <= v <= 110) for v in midi)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "목표 음 정보가 올바르지 않아요.")
+    job_id = uuid.uuid4().hex[:12]
+    d = WORK_DIR / job_id
+    d.mkdir()
+    mine_path = d / f"mine{Path(mine.filename or '').suffix or '.webm'}"
+    await save_upload(mine, mine_path)
+    (d / "target.json").write_text(json.dumps({"hop": hop, "midi": midi}), encoding="utf-8")
+    jobs[job_id] = {
+        "kind": "tune",
+        "status": "queued",
+        "step": "대기 중",
+        "progress": 0.0,
+        "dir": str(d),
+        "mine": str(mine_path),
+        "target": str(d / "target.json"),
+        "strength": max(0.0, min(1.0, strength)),
+        "created": time.time(),
+    }
+    queue.put(job_id)
+    return {"id": job_id, "position": queue.qsize()}
+
+
+@app.get("/jobs/{job_id}/tuned")
+def job_tuned(job_id: str, request: Request):
+    return job_file(job_id, request, "tuned.mp3", "audio/mpeg")

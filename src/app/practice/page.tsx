@@ -153,7 +153,7 @@ export default function PracticePage() {
             : picked
               ? `${picked.title.slice(0, 40)} 느낌 연습곡`
               : `${genre} 연습곡 (${style.bpm} BPM)`;
-          savePracticeSong({ title, mix, vocals });
+          savePracticeSong({ title, mix, vocals, notes: notes?.notes ?? null });
           return;
         }
         const step =
@@ -190,8 +190,9 @@ export default function PracticePage() {
 
   function goCompare() {
     if (gen.kind !== "done") return;
-    const mixSrc: AudioSource = { name: "practice-song.mp3", blob: gen.mix, origin: "cover" };
-    const guide: AudioSource = gen.vocals ? { name: "practice-guide-vocals.mp3", blob: gen.vocals, origin: "cover" } : mixSrc;
+    const notes = gen.notes?.notes ?? null;
+    const mixSrc: AudioSource = { name: "practice-song.mp3", blob: gen.mix, origin: "cover", notes };
+    const guide: AudioSource = gen.vocals ? { name: "practice-guide-vocals.mp3", blob: gen.vocals, origin: "cover", notes } : mixSrc;
     setPendingGuide(guide, mixSrc);
     router.push("/compare");
   }

@@ -1,10 +1,14 @@
 "use client";
 
+import type { NoteInfo } from "@/lib/audio/notes.ts";
+
 /** 페이지 이동 사이에 음원을 넘기기 위한 간단한 메모리 저장소 (데모용) */
 export interface AudioSource {
   name: string;
   blob: Blob;
   origin: "file" | "record" | "sample" | "cover" | "library";
+  /** 연습곡이면 글자별 음표 정보 (글자별 피드백에 사용) */
+  notes?: NoteInfo[] | null;
 }
 
 let pendingGuide: AudioSource | null = null;
