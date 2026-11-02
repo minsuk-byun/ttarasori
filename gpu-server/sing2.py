@@ -132,11 +132,16 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             continue
         if sr != SRW:
             x = librosa.resample(x, orig_sr=sr, target_sr=SRW)
-        x = x.astype(np.float64)
+        x = np.nan_to_num(x.astype(np.float64))
+        # 완전한 무음(0)이 있으면 분석값이 0 이 되어 합성 때 NaN 이 생겨요 → 아주 작은 잡음을 더해요
+        x = x + np.random.default_rng(0).standard_normal(len(x)) * 1e-6
         starts = align(x, SRW, [pron[k] for k in idxs])
-        f0, t = pw.harvest(x, SRW, frame_period=FRAME * 1000, f0_floor=60, f0_ceil=600)
-        sp = pw.cheaptrick(x, f0, t, SRW)
-        ap = pw.d4c(x, f0, t, SRW)
+        # dio+stonemask: harvest 보다 훨씬 빨라요 (읽기 음성이라 정확도도 충분)
+        f0, t = pw.dio(x, SRW, f0_floor=60, f0_ceil=600, frame_period=FRAME * 1000)
+        f0 = pw.stonemask(x, f0, t, SRW)
+        sp = np.maximum(np.nan_to_num(pw.cheaptrick(x, f0, t, SRW), nan=1e-12), 1e-12)
+        ap = np.clip(np.nan_to_num(pw.d4c(x, f0, t, SRW), nan=1.0), 0.0, 1.0)
+        f0 = np.nan_to_num(f0)
         nf = len(f0)
         # 마지막 글자는 목소리가 끝나는 곳까지
         hop = int(SRW * FRAME)
@@ -188,12 +193,12 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             prev_end = nt["start"] + dur
             prev_hz = hz
 
-    y = pw.synthesize(out_f0, out_sp, out_ap, SRW, FRAME * 1000)
+    y = np.nan_to_num(pw.synthesize(out_f0, out_sp, out_ap, SRW, FRAME * 1000), nan=0.0, posinf=0.0, neginf=0.0)
     # 노래하는 곳만 남기고 경계는 10ms 로 부드럽게
     m = np.convolve(mask, np.ones(3) / 3, mode="same")
     env = np.interp(np.arange(len(y)) / SRW, np.arange(n_out) * FRAME, m)
     y = y * env
-    y = librosa.resample(y, orig_sr=SRW, target_sr=sr_out)[: int(total * sr_out)]
+    y = librosa.resample(np.nan_to_num(y), orig_sr=SRW, target_sr=sr_out)[: int(total * sr_out)]
     peak = float(np.max(np.abs(y))) or 1.0
     return (y / peak * 0.8).astype(np.float32)
 
@@ -225,10 +230,11 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
         pron += pronounce([orig[i] for i in g])
     pron_lines = ["".join(pron[i] for i in g) for g in groups]
 
+    # MeloTTS 가 있으면 먼저, 충분히 또렷하면(60% 이상) 거기서 끝내요. 아니면 MMS 로 한 번 더.
     candidates = []
     if melo_ready():
         candidates.append(("melo", 0.85))
-    candidates += [("mms", (0.8, 0.4)), ("mms", (1.0, 0.33))]
+    candidates.append(("mms", (0.8, 0.4)))
     results = []
     errors = []
     for engine, opt in candidates:
@@ -241,7 +247,7 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
             c = clarity(y, sr, orig, pron)
             results.append((c if c is not None else (0.5 if engine == "melo" else 0.4), engine, opt, y))
             print(f"[ttarasori] 가사 노래 후보 {engine} {opt}: 또렷함 {c}", flush=True)
-            if c is not None and c >= 0.85:
+            if c is not None and c >= 0.6:
                 break  # 충분히 또렷하면 더 안 만들어요
         except Exception as e:  # noqa: BLE001
             errors.append(f"{engine}: {type(e).__name__}: {e}"[:200])
