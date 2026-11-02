@@ -10,10 +10,20 @@ log() {
   echo "[ttarasori] $*" > /proc/1/fd/1 2>/dev/null || true
 }
 
-download() { # url dest
-  if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$2" "$1"
-  elif command -v wget >/dev/null 2>&1; then wget -qO "$2" "$1"
-  else python3 -c "import sys,urllib.request;urllib.request.urlretrieve(sys.argv[1],sys.argv[2])" "$1" "$2"; fi
+download() { # url dest — 멈추지 않게 시간 제한과 재시도 (예전에 GitHub 다운로드가 1시간 넘게 멈춘 적이 있어요)
+  for attempt in 1 2 3 4; do
+    rm -f "$2"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --connect-timeout 15 --max-time 180 -o "$2" "$1" && return 0
+    elif command -v wget >/dev/null 2>&1; then
+      timeout 180 wget -q -T 15 -O "$2" "$1" && return 0
+    else
+      timeout 180 python3 -c "import sys,urllib.request;urllib.request.urlretrieve(sys.argv[1],sys.argv[2])" "$1" "$2" && return 0
+    fi
+    log "내려받기 실패 ($attempt/4), 다시 시도: $1"
+    sleep $((attempt * 5))
+  done
+  return 1
 }
 
 start_tunnel() {
@@ -21,7 +31,10 @@ start_tunnel() {
   [ "${ENABLE_TUNNEL:-1}" = "1" ] || return 0
   if [ ! -x /root/cloudflared ]; then
     log "cloudflared 내려받는 중"
-    download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared
+    if ! download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared; then
+      log "cloudflared 를 내려받지 못했어요. 터널 없이 서버만 켜요 (VPN 안에서만 접속 가능)"
+      return 0
+    fi
     chmod +x /root/cloudflared
   fi
   pkill -f "cloudflared tunnel" 2>/dev/null || true
