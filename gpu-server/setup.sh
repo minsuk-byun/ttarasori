@@ -35,8 +35,9 @@ start_tunnel() {
     got_tools=0
     for attempt in 1 2 3; do
       rm -rf /tmp/ttarasori-tools
-      if err=$(timeout 180 git clone -q --depth 1 -b tools https://github.com/minsuk-byun/ttarasori /tmp/ttarasori-tools 2>&1) &&
-        cp /tmp/ttarasori-tools/cloudflared-linux-amd64 /root/cloudflared; then
+      rm -f /root/cloudflared 2>/dev/null || true # 예전 설치가 남긴 끊어진 링크가 있으면 복사가 실패해요
+      if err=$(timeout 180 git clone -q --depth 1 -b tools https://github.com/minsuk-byun/ttarasori /tmp/ttarasori-tools 2>&1 &&
+        cp /tmp/ttarasori-tools/cloudflared-linux-amd64 /root/cloudflared 2>&1); then
         got_tools=1
         break
       fi
@@ -46,6 +47,10 @@ start_tunnel() {
     if [ "$got_tools" = 1 ]; then
       chmod +x /root/cloudflared
       log "cloudflared 준비 완료 (저장소 tools 브랜치)"
+    elif download https://raw.githubusercontent.com/minsuk-byun/ttarasori/tools/cloudflared-linux-amd64 /root/cloudflared; then
+      # 같은 파일을 GitHub 원본 파일 서버로 (릴리스 서버와 다른 경로)
+      chmod +x /root/cloudflared
+      log "cloudflared 준비 완료 (원본 파일 서버)"
     elif download https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 /root/cloudflared; then
       chmod +x /root/cloudflared
     else
