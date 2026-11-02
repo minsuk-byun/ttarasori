@@ -149,10 +149,16 @@ export default function RepeatPractice({ seg, refFeatures, backing, tones, playe
         const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
         const x = await decodeToMono(blob);
         const uf = await extractFeatures(x, SAMPLE_RATE);
-        const c = compareFeatures(sliceFeatures(refFeatures, start, end), uf);
+        // 녹음은 음악 재생과 동시에 시작하니 시간차는 마이크 지연(녹음이 0~0.45초 늦음)만 찾으면 돼요
+        // 앞부분(듣기만 하는 2초)은 빼고 연습 구간 바로 앞부터 비교
+        const from0 = Math.max(start, seg.start - 0.3);
+        const c = compareFeatures(sliceFeatures(refFeatures, from0, end), sliceFeatures(uf, from0 - start, uf.duration), {
+          minLagSec: -0.1,
+          maxLagSec: 0.45,
+        });
         // 연습 구간과 겹치는 프레이즈만 점수에 반영
-        const a = seg.start - start;
-        const b = seg.end - start;
+        const a = seg.start - from0;
+        const b = seg.end - from0;
         const inSeg = c.segments.filter((s) => s.end > a && s.start < b);
         const voiced = c.userMidi.some((v) => v != null);
         let score = 0;

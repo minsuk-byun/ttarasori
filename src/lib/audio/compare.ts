@@ -287,15 +287,17 @@ function buildIssues(s: Omit<Segment, "issues" | "score" | "index">): Issue[] {
   return issues.sort((a, b) => b.severity - a.severity);
 }
 
-export function compareFeatures(ref: Features, user: Features): Comparison {
+export function compareFeatures(ref: Features, user: Features, opts: { maxLagSec?: number; minLagSec?: number } = {}): Comparison {
   const hop = ref.hopSec;
   const n = ref.f0.length;
 
   // 1) 전체 시간차
   const aRef = alignCurve(ref);
   const aUser = alignCurve(user);
-  const maxLag = Math.round(3 / hop);
-  const { lag } = bestLag(aRef, aUser, -maxLag, maxLag);
+  // 시작 시점 차이 탐색 범위 (구간 다시 부르기처럼 시작 시점을 아는 경우엔 좁게)
+  const maxLag = Math.round((opts.maxLagSec ?? 3) / hop);
+  const minLag = Math.round((opts.minLagSec ?? -(opts.maxLagSec ?? 3)) / hop);
+  const { lag } = bestLag(aRef, aUser, minLag, maxLag);
 
   const userAt = (i: number) => {
     const j = i + lag;
