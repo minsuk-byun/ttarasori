@@ -316,7 +316,8 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
 
     methods: list[tuple[str, object]] = []
     if melo_ready():
-        methods += [("melo", 0.85), ("melo", 0.7)]
+        # 천천히(0.7) 읽은 쪽이 노래로 늘였을 때 훨씬 또렷했어요 (테스트: 1줄 0.27→0.94, 2줄 0.31→0.78) → 먼저 써서 다시 부르기를 줄여요
+        methods += [("melo", 0.7), ("melo", 0.85)]
     methods += [("mms", (0.8, 0.4)), ("mms", (0.7, 0.33))]
     errors: list[str] = []
     cache: dict[tuple, tuple[np.ndarray, int] | None] = {}
