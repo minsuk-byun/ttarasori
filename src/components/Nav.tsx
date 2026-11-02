@@ -9,6 +9,8 @@ const LINKS = [
   { href: "/cover", label: "AI 커버 만들기", short: "AI 커버" },
   { href: "/compare", label: "내 노래 비교", short: "비교·교정" },
 ];
+// 단계를 마친 뒤 매일 돌아와서 하는 곳
+const TRAIN = { href: "/train", label: "오늘의 연습", short: "연습" };
 
 
 export default function Nav() {
@@ -46,6 +48,20 @@ export default function Nav() {
               </Link>
             );
           })}
+          <span className="mx-1 my-2 w-px shrink-0 bg-line" aria-hidden />
+          <Link
+            href={TRAIN.href}
+            aria-current={path === TRAIN.href ? "page" : undefined}
+            className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-semibold transition-colors sm:px-3 ${
+              path === TRAIN.href ? "bg-good text-white" : "text-good hover:bg-key"
+            }`}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+              <path d="M8 1.5 9.9 5.6l4.4.5-3.3 3 .9 4.4L8 11.3 4.1 13.5 5 9.1 1.7 6.1l4.4-.5Z" fill="currentColor" />
+            </svg>
+            <span className="hidden sm:inline">{TRAIN.label}</span>
+            <span className="sm:hidden">{TRAIN.short}</span>
+          </Link>
         </div>
       </nav>
     </header>

@@ -16,6 +16,8 @@ interface Props {
   /** 음만 듣기용 목표 음 (가이드 기준 시간) */
   tones: { midi: number; start: number; dur: number }[];
   player: Player;
+  /** 다시 부를 때마다 (점수, 걸린 시간) — 연습 기록에 저장 */
+  onAttempt?: (score: number, seconds: number) => void;
 }
 
 interface Attempt {
@@ -68,7 +70,7 @@ function playTones(tones: Props["tones"], from: number, to: number, rate: number
 }
 
 /** 고른 구간만 반복해서 듣고, 다시 불러서 점수가 오르는지 바로 확인 */
-export default function RepeatPractice({ seg, refFeatures, backing, tones, player }: Props) {
+export default function RepeatPractice({ seg, refFeatures, backing, tones, player, onAttempt }: Props) {
   const [speed, setSpeed] = useState(1);
   const [mode, setMode] = useState<"idle" | "loop" | "tones" | "ready" | "recording" | "scoring">("idle");
   const [attempts, setAttempts] = useState<Attempt[]>([]);
@@ -170,6 +172,7 @@ export default function RepeatPractice({ seg, refFeatures, backing, tones, playe
           note = top ? (top.kind === "good" ? "잘 불렀어요" : top.title) : "잘 불렀어요";
         }
         setAttempts((all) => [...all, { n: all.length + 1, score, note, url: URL.createObjectURL(blob) }]);
+        if (voiced) onAttempt?.(score, end - start);
       } catch {
         setError("녹음을 분석하지 못했어요. 다시 한번 불러 주세요.");
       }

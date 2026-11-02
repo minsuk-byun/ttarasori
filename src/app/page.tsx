@@ -71,6 +71,15 @@ export default function Home() {
               </li>
             ))}
           </ol>
+          <div className="mt-10 flex flex-wrap items-center gap-4 rounded-2xl bg-paper p-5">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-semibold">그다음엔 매일 10분, 오늘의 연습</h3>
+              <p className="mt-1 text-muted">비교 결과로 내 약점을 찾아 맞춤 연습을 만들고, 틀린 구절을 다시 불러 보게 해요. 점수가 오르는 걸 그래프로 볼 수 있어요.</p>
+            </div>
+            <Link href="/train" className="shrink-0 rounded-xl bg-good px-5 py-3 font-semibold text-white hover:brightness-110">
+              오늘의 연습 →
+            </Link>
+          </div>
         </div>
       </section>
     </main>

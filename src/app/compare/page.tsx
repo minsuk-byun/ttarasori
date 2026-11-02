@@ -16,6 +16,8 @@ import { SAMPLE_RATE } from "@/lib/audio/synth.ts";
 import { getSample } from "@/lib/samples";
 import { saveToLibrary } from "@/lib/practiceLibrary";
 import { takePendingGuide, type AudioSource } from "@/lib/store";
+import { addPhrase, addSession, encodeWav, recordPhraseByPlace, songKeyOf, songTitleOf, type Weak } from "@/lib/progress";
+import type { NoteInfo } from "@/lib/audio/notes.ts";
 
 interface Analysis {
   c: Comparison;
@@ -69,7 +71,10 @@ export default function ComparePage() {
       const given = g.notes?.length ? g.notes : null;
       const noteList = given ?? autoNotes(c.refMidi, c.hopSec);
       const hasLyrics = !!given && given.some((n) => n.syllable && n.syllable !== "라" && n.syllable !== "아");
-      setResult({ c, ref: gf, notes: analyzeNotes(c, noteList), hasLyrics, tones: noteList });
+      const noteResults = analyzeNotes(c, noteList);
+      setResult({ c, ref: gf, notes: noteResults, hasLyrics, tones: noteList });
+      // 연습 기록과 '다시 연습할 구절' 저장 (샘플 체험은 빼요)
+      if (g.origin !== "sample") void saveProgress(g, c, noteResults, noteList, hasLyrics, gx, mx.length / SAMPLE_RATE);
       setStatus({ kind: "idle" });
       // 직접 녹음하거나 올린 내 노래는 다음에 다시 고를 수 있게 브라우저에 저장
       if (m.origin === "record" || m.origin === "file") {
@@ -295,6 +300,12 @@ function Results({ analysis, guide, mine, backing }: { analysis: Analysis; guide
               backing={backing}
               tones={analysis.tones.filter((t) => t.start + t.dur > seg.start - 0.5 && t.start < seg.end + 0.5)}
               player={player}
+              onAttempt={(score, seconds) => {
+                if (guide.origin === "sample") return;
+                const songKey = songKeyOf(guide.name, guide.blob.size);
+                void addSession({ kind: "repeat", songKey, songTitle: songTitleOf(guide.name), score, seconds });
+                void recordPhraseByPlace(songKey, seg.start, score);
+              }}
             />
           }
         />
@@ -320,6 +331,22 @@ function Results({ analysis, guide, mine, backing }: { analysis: Analysis; guide
               </button>
             ))}
           </div>
+        </section>
+      )}
+
+      {guide.origin !== "sample" && (
+        <section className="flex flex-wrap items-center gap-3 rounded-2xl border border-good/30 bg-surface p-4 sm:p-5">
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold">이 결과를 연습 기록에 저장했어요</div>
+            <p className="text-sm text-muted">
+              {result.segments.some((s) => s.score < 75)
+                ? "점수가 낮은 구간은 '다시 연습할 구절'에 담았어요. 오늘의 연습에서 내 약점에 맞춘 연습과 함께 이어서 할 수 있어요."
+                : "오늘의 연습에서 내 약점에 맞춘 연습을 이어서 할 수 있어요."}
+            </p>
+          </div>
+          <a href="/train" className="shrink-0 rounded-lg bg-good px-4 py-2.5 text-sm font-semibold text-white hover:brightness-110">
+            오늘의 연습으로
+          </a>
         </section>
       )}
 
@@ -480,4 +507,60 @@ function PlayBtn({
       {active ? "멈추기" : children}
     </button>
   );
+}
+
+/* ------------------------------------------------------------------ 연습 기록 */
+
+async function saveProgress(
+  g: AudioSource,
+  c: Comparison,
+  notes: NoteResult[],
+  noteList: NoteInfo[],
+  hasLyrics: boolean,
+  gx: Float32Array,
+  seconds: number,
+) {
+  const songKey = songKeyOf(g.name, g.blob.size);
+  const songTitle = songTitleOf(g.name);
+  const weak: Weak = { flat: 0, sharp: 0, late: 0, early: 0, missing: 0, unstable: 0, scoop: 0 };
+  for (const n of notes) for (const p of n.problems) weak[p]++;
+  for (const s of c.segments) if (s.issues.some((i) => i.kind === "unstable")) weak.unstable++;
+  const shift = c.octaveShift + c.keyShift;
+  const um = c.userMidi.filter((v): v is number => v != null).map((v) => v + shift).sort((a, b) => a - b);
+  const diffs = c.diffCents.filter((d): d is number => d != null && Math.abs(d) < 600).sort((a, b) => a - b);
+  await addSession({
+    kind: "compare",
+    songKey,
+    songTitle,
+    score: c.overall.score,
+    pitchAcc: c.overall.pitchAccuracy,
+    meanAbsCents: c.overall.meanAbsCents,
+    offsetCents: diffs.length ? diffs[Math.floor(diffs.length / 2)] : 0,
+    timingMs: c.overall.timingMs,
+    seconds,
+    weak,
+    rangeLow: um.length ? Math.round(um[Math.floor(um.length * 0.1)]) : undefined,
+    rangeHigh: um.length ? Math.round(um[Math.floor(um.length * 0.9)]) : undefined,
+  });
+
+  // 점수가 낮은 구간(75점 미만) 최대 3개를 '다시 연습할 구절'로
+  const dur = gx.length / SAMPLE_RATE;
+  const weakSegs = [...c.segments].filter((s) => s.score < 75).sort((a, b) => a.score - b.score).slice(0, 3);
+  for (const seg of weakSegs) {
+    const a = Math.max(0, seg.start - 0.8);
+    const b = Math.min(dur, seg.end + 0.5);
+    const inSeg = noteList.filter((n) => n.start + n.dur > seg.start && n.start < seg.end);
+    const lyric = inSeg.map((n) => n.syllable).join("");
+    await addPhrase({
+      songKey,
+      songTitle,
+      label: hasLyrics && lyric ? (lyric.length > 18 ? `${lyric.slice(0, 18)}…` : lyric) : `${fmtTime(seg.start)} ~ ${fmtTime(seg.end)} 구간`,
+      songStart: seg.start,
+      clip: encodeWav(gx.subarray(Math.floor(a * SAMPLE_RATE), Math.floor(b * SAMPLE_RATE)), SAMPLE_RATE),
+      clipStart: seg.start - a,
+      segDur: seg.end - seg.start,
+      tones: inSeg.map((n) => ({ midi: n.midi, start: n.start - a, dur: n.dur })),
+      firstScore: seg.score,
+    });
+  }
 }
