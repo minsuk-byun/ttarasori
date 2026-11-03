@@ -28,12 +28,12 @@ interface Video {
   style: Style;
 }
 
-const STEPS = ["요청 보내기", "새 멜로디 만들기", "가사로 노래 만들기", "반주 만들기", "가이드 보컬 만들기", "합치기"];
+const STEPS = ["요청 보내기", "멜로디 만들기", "가사로 노래 만들기", "반주 만들기", "가이드 보컬 만들기", "합치기"];
 
 type Gen =
   | { kind: "idle" }
   | { kind: "running"; step: number; detail?: string }
-  | { kind: "done"; mixUrl: string; mix: Blob; vocals: Blob | null; notes: PracticeNotes | null }
+  | { kind: "done"; mixUrl: string; mix: Blob; vocals: Blob | null; notes: PracticeNotes | null; warn?: string }
   | { kind: "error"; msg: string };
 
 export default function PracticePage() {
@@ -54,6 +54,9 @@ export default function PracticePage() {
   const [lyricsTouched, setLyricsTouched] = useState(false);
   const [sampleIdx, setSampleIdx] = useState(0);
   // 4. 목소리
+  const [melodyMode, setMelodyMode] = useState<"new" | "hum">("new");
+  const [hum, setHum] = useState<AudioSource | null>(null);
+
   const [voice, setVoice] = useState<AudioSource | null>(null);
   const [voiceMode, setVoiceMode] = useState<"guided" | "file" | "none">("guided");
   // 5. 만들기
@@ -117,6 +120,7 @@ export default function PracticePage() {
   const lyricsOk = !lyricsOn || (syllableCount >= LYRICS_MIN && syllableCount <= LYRICS_MAX);
   const live = gpu?.enabled === true;
   const voiceOk = voiceMode === "none" || !!voice;
+  const humOk = melodyMode === "new" || !!hum;
 
   async function make(nextSeed = seed) {
     try {
@@ -133,6 +137,7 @@ export default function PracticePage() {
           seed: nextSeed,
           lyrics: lyricsOn ? lyrics : undefined,
           voice: voiceMode !== "none" && voice ? { blob: voice.blob, name: voice.name } : null,
+          hum: melodyMode === "hum" && hum ? { blob: hum.blob, name: hum.name } : null,
         },
         (p) => setGen({ kind: "running", step: 0, detail: `${Math.round(p * 100)}%` }),
       );
@@ -145,12 +150,19 @@ export default function PracticePage() {
           const mix = await fetchChunked(resultUrl(cfg, id, "mix"), "audio/mpeg");
           const vocals = await fetchChunked(resultUrl(cfg, id, "vocals"), "audio/mpeg").catch(() => null);
           const notes = await getNotes(cfg, id).catch(() => null);
-          setGen({ kind: "done", mixUrl: URL.createObjectURL(mix), mix, vocals, notes });
+          // 예전 서버는 허밍을 모르고 그냥 새 멜로디로 만들어요 → 알려 주기
+          const warn =
+            melodyMode === "hum" && notes && notes.melody_source !== "hum"
+              ? "GPU 서버가 아직 허밍 기능을 모르는 버전이라, 허밍 대신 새 멜로디로 만들었어요. 서버를 새로 시작하면 허밍을 쓸 수 있어요."
+              : undefined;
+          setGen({ kind: "done", mixUrl: URL.createObjectURL(mix), mix, vocals, notes, warn });
           const genre = GENRES.find((g) => g.id === style.genre)?.label ?? "연습곡";
           const firstLine = lyricsOn ? lyrics.split("\n")[0].trim().slice(0, 20) : "";
           const title = firstLine
             ? `「${firstLine}」 ${genre} 연습곡`
-            : picked
+            : notes?.melody_source === "hum"
+              ? `내 허밍 ${genre} 연습곡`
+              : picked
               ? `${picked.title.slice(0, 40)} 느낌 연습곡`
               : `${genre} 연습곡 (${style.bpm} BPM)`;
           savePracticeSong({ title, mix, vocals, notes: notes?.notes ?? null });
@@ -217,7 +229,7 @@ export default function PracticePage() {
       <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">연습곡 만들기</h1>
       <p className="mt-3 text-[17px] leading-relaxed text-muted">
         부르고 싶은 노래를 찾으면, 그 노래와 분위기가 닮은 <strong className="font-semibold text-ink">새 연습곡</strong>을 만들어 드려요.
-        원곡의 음원이나 멜로디는 쓰지 않고, 장르·분위기·빠르기만 참고해요.
+        원곡 음원은 쓰지 않고 장르·분위기·빠르기만 참고해요. 멜로디는 새로 짓거나, 원하면 <strong className="font-semibold text-ink">내가 직접 부른 허밍</strong>에서 가져와요.
       </p>
       {gpu && !live && (
         <p className="mt-4 rounded-xl bg-guide-soft px-4 py-3 text-sm leading-relaxed text-guide">
@@ -295,6 +307,32 @@ export default function PracticePage() {
           <p className="-mt-2 mb-4 text-sm text-muted">
             {picked ? "원곡 정보로 골라 둔 스타일이에요. 마음대로 바꿔도 돼요." : "원곡을 고르지 않아도 직접 골라서 만들 수 있어요."}
           </p>
+          <div className="mb-5 rounded-xl border border-line p-4">
+            <Toggle
+              label="멜로디"
+              options={[
+                ["새로 짓기", melodyMode === "new", () => setMelodyMode("new")],
+                ["내 허밍으로", melodyMode === "hum", () => setMelodyMode("hum")],
+              ]}
+            />
+            {melodyMode === "hum" && (
+              <div className="mt-4">
+                <AudioInput
+                  label="내 허밍"
+                  hint="원곡 멜로디를 떠올리며 '라라라'나 '음~'으로 10~30초 불러 주세요. 음마다 살짝 끊어 부르면 더 정확해요."
+                  tone="mine"
+                  value={hum}
+                  onChange={setHum}
+                  allowRecord
+                />
+                <ul className="mt-3 space-y-1 text-xs leading-relaxed text-muted">
+                  <li>· 원곡은 끄고, 조용한 곳에서 불러 주세요. 원곡 소리가 섞이면 멜로디를 잘못 읽어요.</li>
+                  <li>· 빠르기와 조성은 허밍을 따라가요. 아래 빠르기·조성 설정은 허밍에서 알아내기 어려울 때만 써요.</li>
+                  <li>· 내가 부른 멜로디가 원곡과 같다면 그 멜로디는 원곡 작곡가의 것이에요. 혼자 연습할 때만 써 주세요.</li>
+                </ul>
+              </div>
+            )}
+          </div>
           <ChipGroup label="장르">
             {GENRES.map((g) => (
               <Chip
@@ -437,10 +475,10 @@ export default function PracticePage() {
           </label>
         </Step>
 
-        <Step n={5} title="연습곡 만들기" disabled={!voiceOk || !lyricsOk}>
+        <Step n={5} title="연습곡 만들기" disabled={!voiceOk || !lyricsOk || !humOk}>
           {gen.kind !== "done" && (
             <button
-              disabled={!voiceOk || !lyricsOk || running || !live}
+              disabled={!voiceOk || !lyricsOk || !humOk || running || !live}
               onClick={() => make()}
               className="rounded-xl bg-guide px-6 py-3 font-semibold text-white disabled:opacity-35"
             >
@@ -468,7 +506,8 @@ export default function PracticePage() {
               <div className="font-semibold">연습곡이 완성됐어요</div>
               <div className="mt-0.5 text-sm text-white/60">이 브라우저에 저장했어요. AI 커버 만들기에서 &quot;내 연습곡에서 고르기&quot;로 다시 쓸 수 있어요.</div>
               <div className="mt-0.5 text-sm text-white/60">
-                {GENRES.find((g) => g.id === style.genre)?.label}, {style.bpm} BPM{picked ? `, "${picked.title}" 느낌` : ""}
+                {GENRES.find((g) => g.id === style.genre)?.label}, {gen.notes?.bpm ?? style.bpm} BPM
+                {gen.notes?.melody_source === "hum" ? ", 내 허밍 멜로디" : picked ? `, "${picked.title}" 느낌` : ""}
               </div>
               <audio
                 ref={audioRef}
@@ -478,6 +517,13 @@ export default function PracticePage() {
                 onTimeUpdate={(e) => setHead(e.currentTarget.currentTime)}
                 onPause={() => setHead(null)}
               />
+              {gen.warn && <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-sm text-[#f5c542]">{gen.warn}</p>}
+              {gen.notes?.melody_source === "hum" && gen.notes.hum_info && (
+                <p className="mt-3 text-sm text-white/70">
+                  내 허밍에서 음 {gen.notes.hum_info.notes}개를 읽었어요 · {gen.notes.hum_info.key.replace("m", " 단조")}
+                  {gen.notes.hum_info.minor ? "" : " 장조"} · {gen.notes.hum_info.bpm} BPM
+                </p>
+              )}
               {gen.notes?.lyrics && (
                 <Karaoke notes={gen.notes} audio={audioRef} sung={!!gen.notes.sung} />
               )}

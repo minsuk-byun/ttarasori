@@ -5,7 +5,7 @@ POST /jobs              원곡 + 목소리 샘플 + 키 → 작업 ID
 GET  /jobs/{id}         진행 상태
 GET  /jobs/{id}/mix     완성된 AI 커버 (반주 포함, mp3)
 GET  /jobs/{id}/vocals  AI 보컬만 (wav, 비교 분석용)
-POST /practice          스타일 설명(+가사) → 새 연습곡
+POST /practice          스타일 설명(+가사, +허밍) → 새 연습곡
 POST /tune              내 녹음 + 목표 음 → 음정만 고친 내 목소리 교정본
 GET  /jobs/{id}/tuned   교정본 (mp3)
 POST /pronounce         내 녹음 (+ 가이드 보컬) → 음성 인식 결과 (발음 진단용)
@@ -221,8 +221,18 @@ def run_practice(job_id: str):
     d = Path(job["dir"])
     import sing
 
-    set_step(job_id, "새 멜로디 만들기", 0.05)
-    notes, total, tonic = make_melody(job["bpm"], job["minor"], job["low"], job["seed"])
+    hum_info = None
+    if job.get("hum"):
+        # 내 허밍에서 멜로디 뽑기: 빠르기·조성도 허밍을 따라가요
+        import hum
+
+        set_step(job_id, "허밍에서 멜로디 뽑기", 0.05)
+        notes, total, tonic, hum_info = hum.extract(Path(job["hum"]), job["bpm"], job["low"])
+        job["bpm"], job["minor"] = hum_info["bpm"], hum_info["minor"]
+        print(f"[ttarasori] 허밍 멜로디: {hum_info}", flush=True)
+    else:
+        set_step(job_id, "새 멜로디 만들기", 0.05)
+        notes, total, tonic = make_melody(job["bpm"], job["minor"], job["low"], job["seed"])
     syls = sing.syllables(job.get("lyrics") or "")
     if syls:
         notes = sing.ensure_min(sing.fit_notes(notes, len(syls)))
@@ -281,6 +291,8 @@ def run_practice(job_id: str):
                 "sung": sung,
                 "sing_error": sing_error,
                 "sing_info": sing_info,
+                "melody_source": "hum" if hum_info else "new",
+                "hum_info": hum_info,
             },
             ensure_ascii=False,
         ),
@@ -397,7 +409,9 @@ def run_job(job_id: str):
         job.update(status="error", error="음원 처리 중 오류가 났어요.", detail=(e.stderr or b"")[-2000:].decode(errors="ignore"))
     except Exception as e:  # noqa: BLE001
         what = {"practice": "연습곡을", "tune": "교정본을", "pronounce": "발음 진단을"}.get(job.get("kind") or "", "AI 커버를")
-        job.update(status="error", error=f"{what} 만들지 못했어요.", detail="".join(traceback.format_exception(e))[-2000:])
+        # 허밍 분석 오류는 사용자가 고칠 수 있는 안내라서 그대로 보여 줘요
+        msg = str(e) if type(e).__name__ == "HumError" else f"{what} 만들지 못했어요."
+        job.update(status="error", error=msg, detail="".join(traceback.format_exception(e))[-2000:])
 
 
 def worker():
@@ -516,6 +530,7 @@ def health():
         "tune_ready": _tune_ready(),
         "pronounce_ready": _pronounce_ready(),
         "melo_ready": os.path.exists("/opt/melo-ok"),
+        "hum_melody": True,
         "queue": queue.qsize(),
         "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
     }
@@ -617,8 +632,10 @@ async def create_practice(
     seed: int = Form(0),
     lyrics: str = Form(""),
     voice: UploadFile | None = File(None),
+    hum: UploadFile | None = File(None),
 ):
-    """원곡 '느낌'(텍스트 설명)만으로 새 연습곡 만들기. 원곡 음원은 받지 않아요."""
+    """원곡 '느낌'(텍스트 설명)으로 연습곡 만들기. 원곡 음원은 받지 않아요.
+    hum: 사용자가 직접 부른 허밍 녹음 (있으면 그 멜로디·빠르기로 만들어요)"""
     verify(token_from(request))
     if not 50 <= bpm <= 160:
         raise HTTPException(400, "빠르기는 50~160 BPM 사이로 정해 주세요.")
@@ -632,6 +649,10 @@ async def create_practice(
     if voice is not None and voice.filename:
         voice_path = d / f"voice{Path(voice.filename).suffix or '.webm'}"
         await save_upload(voice, voice_path)
+    hum_path = None
+    if hum is not None and hum.filename:
+        hum_path = d / f"hum{Path(hum.filename).suffix or '.webm'}"
+        await save_upload(hum, hum_path)
     jobs[job_id] = {
         "kind": "practice",
         "status": "queued",
@@ -639,6 +660,7 @@ async def create_practice(
         "progress": 0.0,
         "dir": str(d),
         "voice": str(voice_path) if voice_path else None,
+        "hum": str(hum_path) if hum_path else None,
         "prompt": prompt,
         "bpm": bpm,
         "minor": minor,

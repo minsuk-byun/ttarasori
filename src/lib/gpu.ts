@@ -105,6 +105,8 @@ export interface PracticeRequest {
   seed: number;
   lyrics?: string;
   voice?: { blob: Blob; name: string } | null;
+  /** 내가 직접 부른 허밍 (있으면 그 멜로디·빠르기로 연습곡을 만들어요) */
+  hum?: { blob: Blob; name: string } | null;
 }
 
 export function createPracticeJob(cfg: GpuConfig, req: PracticeRequest, onUpload: (p: number) => void): Promise<string> {
@@ -117,6 +119,7 @@ export function createPracticeJob(cfg: GpuConfig, req: PracticeRequest, onUpload
     fd.append("seed", String(req.seed));
     if (req.lyrics) fd.append("lyrics", req.lyrics);
     if (req.voice) fd.append("voice", req.voice.blob, req.voice.name.includes(".") ? req.voice.name : `${req.voice.name}.webm`);
+    if (req.hum) fd.append("hum", req.hum.blob, req.hum.name.includes(".") ? req.hum.name : `${req.hum.name}.webm`);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${cfg.url}/practice`);
     xhr.setRequestHeader("Authorization", `Bearer ${cfg.token}`);
@@ -145,6 +148,9 @@ export interface PracticeNotes {
   sung?: boolean;
   /** 가사 노래 정보: 쓴 읽기 모델, 음성 인식으로 잰 또렷함(0~1) */
   sing_info?: { engine: string; clarity: number; tried: number; pron: string } | null;
+  /** 멜로디를 어디서 가져왔는지: 새로 지음 / 내 허밍 (예전 서버는 이 값이 없어요) */
+  melody_source?: "new" | "hum";
+  hum_info?: { notes: number; bpm: number; key: string; minor: boolean; hum_seconds: number } | null;
 }
 
 export async function getNotes(cfg: GpuConfig, id: string): Promise<PracticeNotes> {
