@@ -23,17 +23,26 @@ def say(obj):
 
 
 if len(sys.argv) > 1 and sys.argv[1] == "--serve":
+    # 첫 읽기 때 발음용 언어 모델(BERT)을 내려받고 불러와서 몇 분씩 걸려요 → 준비 단계에서 미리 한 번 읽어 둬요
+    try:
+        import tempfile, os as _os
+
+        _w = _os.path.join(tempfile.gettempdir(), "melo-warm.wav")
+        model.tts_to_file("안녕하세요. 오늘도 잘했어.", spk, _w, speed=0.9, quiet=True)
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write(f"warm failed: {e}\n")
     say({"ready": True, "device": str(model.device) if hasattr(model, "device") else ("cuda" if torch.cuda.is_available() else "cpu")})
     for line in sys.stdin:
         line = line.strip()
         if not line:
             continue
+        req = None
         try:
             req = json.loads(line)
             model.tts_to_file(req["text"], spk, req["out"], speed=float(req.get("speed", 0.9)), quiet=True)
-            say({"ok": True})
+            say({"ok": True, "id": req.get("id")})
         except Exception as e:  # noqa: BLE001
-            say({"ok": False, "error": f"{type(e).__name__}: {e}"[:300]})
+            say({"ok": False, "id": req.get("id") if isinstance(req, dict) else None, "error": f"{type(e).__name__}: {e}"[:300]})
 else:
     cfg = json.load(open(sys.argv[1], encoding="utf-8"))
     for i, text in enumerate(cfg["lines"]):

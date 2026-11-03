@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -115,9 +116,25 @@ def tts_melo_line(text: str, speed: float) -> tuple[np.ndarray, int]:
         p = _melo_proc()
         with tempfile.TemporaryDirectory() as d:
             out = str(Path(d) / "line.wav")
-            p.stdin.write(json.dumps({"text": text, "speed": speed, "out": out}, ensure_ascii=False) + "\n")
+            rid = uuid.uuid4().hex[:8]
+            p.stdin.write(json.dumps({"text": text, "speed": speed, "out": out, "id": rid}, ensure_ascii=False) + "\n")
             p.stdin.flush()
-            res = _melo_read(p, 120)
+            try:
+                # 앞 요청이 늦게 끝나 남은 응답은 건너뛰고, 내 요청(id)의 응답만 받아요
+                end = time.time() + 120
+                while True:
+                    res = _melo_read(p, max(1.0, end - time.time()))
+                    if res.get("id") in (rid, None) and "ready" not in res:
+                        break
+            except Exception:
+                # 응답이 없으면 작업자를 끄고 다음에 새로 띄워요 (예전엔 늦은 응답이 다음 요청과 엇갈려 줄줄이 실패했어요)
+                global _melo
+                try:
+                    p.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+                _melo = None
+                raise
             if not res.get("ok"):
                 raise RuntimeError(res.get("error", "MeloTTS 실패"))
             x, sr = sf.read(out, dtype="float64")
@@ -197,7 +214,9 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             x = np.nan_to_num(x.astype(np.float64))
             # 완전한 무음(0)이 있으면 분석값이 0 이 되어 합성 때 NaN 이 생겨요 → 아주 작은 잡음을 더해요
             x = x + np.random.default_rng(0).standard_normal(len(x)) * 1e-6
+            _ta = time.time()
             starts = align(x, SRW, [pron[k] for k in idxs])
+            _tb = time.time()
             # dio+stonemask: harvest 보다 훨씬 빨라요 (읽기 음성이라 정확도도 충분)
             f0, t = pw.dio(x, SRW, f0_floor=60, f0_ceil=600, frame_period=FRAME * 1000)
             f0 = pw.stonemask(x, f0, t, SRW)
@@ -211,6 +230,7 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             loud = np.where(rms > max(1e-4, float(rms.max()) * 0.05))[0]
             end_t = (loud[-1] + 2) * FRAME if len(loud) else nf * FRAME
             segs = [(starts[j], starts[j + 1] if j + 1 < len(starts) else max(starts[j] + 0.1, end_t)) for j in range(len(starts))]
+            print(f"[ttarasori] 시간: 줄 분석 정렬 {_tb - _ta:.1f}초, WORLD {time.time() - _tb:.1f}초 ({len(x) / SRW:.1f}초 음성)", flush=True)
             if memo is not None:
                 memo[mkey] = (starts, f0, sp, ap, nf, segs)
         for k, (s, e) in zip(idxs, segs):
@@ -262,7 +282,9 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             prev_end = nt["start"] + dur
             prev_hz = hz
 
+    _ts = time.time()
     y = np.nan_to_num(pw.synthesize(out_f0, out_sp, out_ap, SRW, FRAME * 1000), nan=0.0, posinf=0.0, neginf=0.0)
+    print(f"[ttarasori] 시간: WORLD 합성 {time.time() - _ts:.1f}초", flush=True)
     # 노래하는 곳만 남기고 경계는 10ms 로 부드럽게
     m = np.convolve(mask, np.ones(3) / 3, mode="same")
     env = np.interp(np.arange(len(y)) / SRW, np.arange(n_out) * FRAME, m)
