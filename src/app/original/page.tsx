@@ -147,6 +147,49 @@ function Picker({ onPick }: { onPick: (v: Video) => void }) {
 
 /* ------------------------------------------------------------------ 듣기·녹음 */
 
+/** 영상 제목에서 (Official MV), [가사], | 채널명 같은 꼬리를 떼서 가사 검색어로 */
+function lyricsQuery(title: string): string {
+  return title
+    .replace(/[\[(【].*?[\])】]/g, " ")
+    .replace(/\b(official|music|video|mv|m\/v|lyrics?|audio|live|performance|teaser|4k|hd)\b/gi, " ")
+    .replace(/가사|뮤직비디오|공식/g, " ")
+    .split(/[|｜]/)[0]
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 가사는 권리가 있는 사이트에서 보도록 새 탭 링크만 줘요 (가사를 가져오거나 저장하지 않아요) */
+function LyricsLinks({ video }: { video: Video }) {
+  const q = encodeURIComponent(lyricsQuery(video.title) || video.title);
+  const links = [
+    ["유튜브 뮤직", `https://music.youtube.com/watch?v=${encodeURIComponent(video.id)}`],
+    ["멜론", `https://www.melon.com/search/total/index.htm?q=${q}`],
+    ["지니", `https://www.genie.co.kr/search/searchMain?query=${q}`],
+    ["벅스", `https://music.bugs.co.kr/search/integrated?q=${q}`],
+  ] as const;
+  return (
+    <div>
+      <div className="text-sm text-muted">가사 보기 (새 탭)</div>
+      <div className="mt-1.5 flex flex-wrap gap-2">
+        {links.map(([label, href]) => (
+          <a
+            key={label}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:border-ink"
+          >
+            {label} ↗
+          </a>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-muted">
+        유튜브 뮤직은 &lsquo;가사&rsquo; 탭에서 볼 수 있어요(음원으로 등록된 곡만). 가사 탭을 옆에 띄워 두고, 원곡은 이 페이지에서 틀고 부르면 돼요. 유튜브 뮤직 탭의 소리는 꺼 두세요.
+      </p>
+    </div>
+  );
+}
+
 type RecState =
   | { kind: "idle" }
   | { kind: "recording"; since: number; level: number }
@@ -341,6 +384,8 @@ function Studio({ video, onChange }: { video: Video; onChange: () => void }) {
               영상에 올라온 가사 자막을 유튜브 플레이어가 보여 줘요. 자막이 없는 영상이면 안 나와요. 검색할 때 &lsquo;가사&rsquo;나 &lsquo;lyrics&rsquo;를 붙이면 가사가 나오는 공식 영상을 찾기 쉬워요.
             </p>
           </div>
+
+          <LyricsLinks video={video} />
 
           <div>
             <h3 className="font-semibold">연습 구간</h3>
