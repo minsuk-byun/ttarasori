@@ -12,7 +12,7 @@ import { beatsFromTaps, pitchLabel, selfCheck, snapTarget, type SelfCheck, type 
 import { SAMPLE_RATE } from "@/lib/audio/synth.ts";
 import { parseVideoId, useYouTube } from "@/lib/useYouTube";
 import { saveToLibrary } from "@/lib/practiceLibrary";
-import { setPendingGuide } from "@/lib/store";
+import { setPendingGuide, setPendingHum } from "@/lib/store";
 
 interface Video {
   id: string;
@@ -455,7 +455,7 @@ function Studio({ video, onChange }: { video: Video; onChange: () => void }) {
 
       {take && (
         <div ref={resultRef} className="scroll-mt-6">
-          <Result take={take} title={video.title} seekOriginal={(t, d) => {
+          <Result take={take} video={video} seekOriginal={(t, d) => {
             const pl = yt.player.current;
             if (!pl) return;
             pl.setPlaybackRate(1);
@@ -484,7 +484,8 @@ const TIPS: Record<string, string> = {
   outOfScale: "이 곡의 음계에 없는 음이에요. 원곡에서 이 부분을 다시 듣고 같은 음인지 확인해 보세요.",
 };
 
-function Result({ take, title, seekOriginal }: { take: Take; title: string; seekOriginal: (t: number, dur: number) => void }) {
+function Result({ take, video, seekOriginal }: { take: Take; video: Video; seekOriginal: (t: number, dur: number) => void }) {
+  const title = video.title;
   const router = useRouter();
   const c = take.check;
   const o = c.overall;
@@ -593,6 +594,29 @@ function Result({ take, title, seekOriginal }: { take: Take; title: string; seek
           </button>
         </section>
       )}
+
+      <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-line p-5 sm:p-6">
+        <div className="max-w-xl flex-1">
+          <div className="text-sm font-semibold text-muted">다른 방법</div>
+          <h2 className="mt-0.5 text-xl font-semibold">이 녹음의 멜로디로 연습곡 만들기</h2>
+          <p className="mt-1 text-sm text-muted">
+            방금 부른 멜로디를 그대로 읽어서 반주와 가이드 노래가 붙은 연습곡을 만들어요. 원곡 음원은 쓰지 않고 내 녹음만 써요(처음 30초까지).
+            {tuned ? " 음정을 고친 가이드가 있어서 그걸로 읽어요." : ""} 원곡 멜로디를 따라 불렀다면 그 멜로디는 원곡 작곡가의 것이니, 혼자 연습이나 과제용으로만 써 주세요.
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            setPendingHum({
+              source: { name: `${title.slice(0, 30)} 따라 부르기`, blob: tuned ?? take.blob, origin: "record" },
+              video,
+            });
+            router.push("/practice");
+          }}
+          className="rounded-xl bg-guide px-5 py-3 font-semibold text-white hover:opacity-90"
+        >
+          연습곡 만들기 →
+        </button>
+      </section>
 
       <section className="rounded-2xl bg-surface p-4 sm:p-6">
         <h2 className="text-xl font-semibold">음별 피드백</h2>

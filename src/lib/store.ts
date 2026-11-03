@@ -28,6 +28,23 @@ export function takePendingGuide(): { guide: AudioSource; playAlong: AudioSource
   return s;
 }
 
+/** 원곡 페이지에서 원곡을 들으며 부른 녹음을 연습곡 멜로디(허밍)로 넘기기 */
+export interface PendingHum {
+  source: AudioSource;
+  video: { id: string; title: string; channel: string; thumbnail?: string | null } | null;
+}
+let pendingHum: PendingHum | null = null;
+
+export function setPendingHum(h: PendingHum) {
+  pendingHum = h;
+}
+
+export function takePendingHum(): PendingHum | null {
+  const h = pendingHum;
+  pendingHum = null;
+  return h;
+}
+
 /** 커버 페이지에서 등록한 목소리를 연습곡 페이지에서도 쓰기 위해 보관 (새로고침하면 사라져요) */
 let registeredVoice: AudioSource | null = null;
 

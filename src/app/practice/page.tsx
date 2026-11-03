@@ -16,7 +16,7 @@ import {
   type PracticeNotes,
 } from "@/lib/gpu";
 import { savePracticeSong } from "@/lib/practiceLibrary";
-import { getRegisteredVoice, setPendingGuide, setRegisteredVoice, type AudioSource } from "@/lib/store";
+import { getRegisteredVoice, setPendingGuide, setRegisteredVoice, takePendingHum, type AudioSource } from "@/lib/store";
 import { LYRICS_MAX, LYRICS_MIN, countSyllables, sampleLyrics } from "@/lib/lyrics";
 import { GENRES, INSTRUMENTS, MOODS, inferStyle, stylePrompt, type Style } from "@/lib/style";
 
@@ -70,6 +70,17 @@ export default function PracticePage() {
     getGpuConfig().then(setGpu);
     const v = getRegisteredVoice();
     if (v) setVoice(v);
+    // 원곡 페이지에서 원곡을 들으며 부른 녹음을 넘겨받았으면 그 멜로디로 만들어요
+    const h = takePendingHum();
+    if (h) {
+      setMelodyMode("hum");
+      setHum(h.source);
+      if (h.video) {
+        const st = inferStyle(h.video.title);
+        setPicked({ ...h.video, thumbnail: h.video.thumbnail ?? null, style: st });
+        setStyle(st);
+      }
+    }
     return () => {
       alive.current = false;
     };
@@ -326,7 +337,14 @@ export default function PracticePage() {
                   allowRecord
                 />
                 <ul className="mt-3 space-y-1 text-xs leading-relaxed text-muted">
-                  <li>· 원곡은 끄고, 조용한 곳에서 불러 주세요. 원곡 소리가 섞이면 멜로디를 잘못 읽어요.</li>
+                  <li>
+                    · 원곡을 들으면서 따라 부르고 싶으면{" "}
+                    <a href="/original" className="font-semibold text-guide underline">
+                      원곡으로 따라 부르기
+                    </a>
+                    에서 이어폰을 끼고 부른 뒤 &lsquo;이 녹음의 멜로디로 연습곡 만들기&rsquo;를 눌러 주세요.
+                  </li>
+                  <li>· 여기서 바로 녹음할 때는 원곡을 끄고 조용한 곳에서 불러 주세요. 원곡 소리가 섞이면 멜로디를 잘못 읽어요. 처음 30초까지 써요.</li>
                   <li>· 빠르기와 조성은 허밍을 따라가요. 아래 빠르기·조성 설정은 허밍에서 알아내기 어려울 때만 써요.</li>
                   <li>· 내가 부른 멜로디가 원곡과 같다면 그 멜로디는 원곡 작곡가의 것이에요. 혼자 연습할 때만 써 주세요.</li>
                 </ul>
