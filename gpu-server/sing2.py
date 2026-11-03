@@ -99,7 +99,7 @@ def _melo_read(p, timeout: float) -> dict:
 
 def warm_melo():
     """서버 시작 뒤 MeloTTS 설치가 끝나면(최대 40분) 작업자를 미리 띄워 둬요"""
-    for _ in range(480):
+    for _ in range(720):  # 설치를 여러 번 다시 시도할 수 있어 최대 60분까지 기다려요
         if melo_ready():
             with _melo_lock:
                 _melo_proc()

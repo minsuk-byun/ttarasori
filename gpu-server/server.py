@@ -424,38 +424,43 @@ def startup():
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=janitor, daemon=True).start()
     # 첫 요청이 느리지 않도록 모델을 미리 올려 둠
+    def _try(name: str, fn, tries: int = 6):
+        """모델 하나 불러오기. 실패해도 다른 모델은 계속 불러오고, 이 모델은 시간을 두고 다시 시도해요.
+        (Hugging Face 가 잠깐 503 을 내면 예전엔 그 뒤 모델들이 전부 안 불러와졌어요)"""
+        for i in range(tries):
+            try:
+                fn()
+                print(f"[ttarasori] {name} 준비 완료", flush=True)
+                return True
+            except Exception:  # noqa: BLE001
+                wait = 60 * (i + 1)
+                print(f"[ttarasori] {name} 로딩 실패 ({i + 1}/{tries}), {wait}초 뒤 다시:\n" + traceback.format_exc()[-600:], flush=True)
+                time.sleep(wait)
+        return False
+
     def warm():
-        try:
-            get_model()
-            print("[ttarasori] 음성 변환 모델 준비 완료", flush=True)
-            get_musicgen()
-            print("[ttarasori] 반주 생성 모델 준비 완료", flush=True)
-            import sing
+        _try("음성 변환 모델", get_model)
+        import sing
 
-            if sing.ready():
-                try:
-                    sing.warm()
-                    print("[ttarasori] 가사 노래 모델 준비 완료", flush=True)
-                except Exception:  # noqa: BLE001
-                    print("[ttarasori] 가사 노래 모델 로딩 실패:\n" + traceback.format_exc()[-1500:], flush=True)
-            else:
-                print("[ttarasori] 가사 노래 패키지(pyworld)가 없어 '라'로만 불러요", flush=True)
-            try:
-                import sing2
+        if sing.ready():
+            _try("가사 노래 모델", sing.warm)
+        else:
+            print("[ttarasori] 가사 노래 패키지(pyworld)가 없어 '라'로만 불러요", flush=True)
 
-                sing2._get_fa()
-                print("[ttarasori] 가사 정렬 모델 준비 완료", flush=True)
-            except Exception:  # noqa: BLE001
-                print("[ttarasori] 가사 정렬 모델 로딩 실패:\n" + traceback.format_exc()[-1500:], flush=True)
-            try:
-                import pronounce
+        def fa():
+            import sing2
 
-                pronounce.get_asr()
-                print("[ttarasori] 발음 진단 모델 준비 완료", flush=True)
-            except Exception:  # noqa: BLE001
-                print("[ttarasori] 발음 진단 모델 로딩 실패:\n" + traceback.format_exc()[-1500:], flush=True)
-        except Exception:  # noqa: BLE001
-            traceback.print_exc()
+            sing2._get_fa()
+
+        def asr():
+            import pronounce
+
+            pronounce.get_asr()
+
+        _try("가사 정렬 모델", fa)
+        _try("발음 진단 모델", asr)
+        # 반주 모델은 가장 커서(약 6GB) 마지막에: 받다가 실패해도 다른 기능은 먼저 쓸 수 있어요
+        _try("반주 생성 모델", get_musicgen)
 
     threading.Thread(target=warm, daemon=True).start()
 

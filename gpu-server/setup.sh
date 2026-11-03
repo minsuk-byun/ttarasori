@@ -112,10 +112,10 @@ python3 -c "import torchaudio" 2>/dev/null || pip install -q --no-cache-dir "tor
 if [ ! -f /opt/melo-ok ]; then
   (
     log "MeloTTS 설치 시작 (뒤에서 진행)"
-    if timeout 1200 bash -c '
+    if timeout 2400 bash -c '
       python3 -m venv --system-site-packages /opt/melo-venv &&
-      /opt/melo-venv/bin/pip install -q --no-cache-dir git+https://github.com/myshell-ai/MeloTTS.git &&
-      /opt/melo-venv/bin/python -m unidic download &&
+      for i in 1 2 3 4; do /opt/melo-venv/bin/pip install -q --no-cache-dir --retries 10 --timeout 60 git+https://github.com/myshell-ai/MeloTTS.git && break; [ $i = 4 ] && exit 1; sleep $((i * 30)); done &&
+      for i in 1 2 3; do /opt/melo-venv/bin/python -m unidic download && break; [ $i = 3 ] && exit 1; sleep 30; done &&
       cd /tmp && echo "{\"lines\":[\"안녕하세요\"],\"speed\":1.0,\"out\":\"/tmp\"}" > /tmp/melo-test.json &&
       /opt/melo-venv/bin/python '"$HERE"'/melo_tts.py /tmp/melo-test.json
     ' > /opt/melo-install.log 2>&1; then
