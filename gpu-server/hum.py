@@ -31,12 +31,12 @@ class HumError(ValueError):
     """사용자에게 그대로 보여 줄 수 있는 오류"""
 
 
-def load(path: Path) -> np.ndarray:
-    """어떤 형식이든 ffmpeg 로 16kHz 모노로 읽기 (최대 30초)"""
+def load(path: Path, max_sec: float = MAX_SEC) -> np.ndarray:
+    """어떤 형식이든 ffmpeg 로 16kHz 모노로 읽기 (허밍은 최대 30초)"""
     with tempfile.TemporaryDirectory() as td:
         out = Path(td) / "hum.wav"
         subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-t", str(MAX_SEC), "-ac", "1", "-ar", str(SR), "-f", "wav", str(out)],
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-t", str(max_sec), "-ac", "1", "-ar", str(SR), "-f", "wav", str(out)],
             check=True,
         )
         _, x = wavfile.read(out)
@@ -253,9 +253,9 @@ def quantize(notes: list[dict], bpm: int, div: int = 4) -> list[dict]:
     return [{"midi": int(o["midi"]), "start": round(o["s"] * g, 4), "dur": round((o["e"] - o["s"]) * g, 4), "syllable": "라"} for o in out]
 
 
-def extract(path: Path, fallback_bpm: int = 80, low: bool = True) -> tuple[list[dict], float, int, dict]:
-    """허밍 파일 → (notes, total, tonic_midi, info)"""
-    x = load(path)
+def extract(path: Path, fallback_bpm: int = 80, low: bool = True, max_sec: float = MAX_SEC) -> tuple[list[dict], float, int, dict]:
+    """허밍 파일 → (notes, total, tonic_midi, info). max_sec: 읽을 최대 길이(초)"""
+    x = load(path, max_sec)
     if len(x) < SR * 5:
         raise HumError("허밍이 너무 짧아요. 5초 이상 불러 주세요.")
     peak = float(np.max(np.abs(x)))

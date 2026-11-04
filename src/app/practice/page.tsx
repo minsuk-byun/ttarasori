@@ -73,6 +73,10 @@ export default function PracticePage() {
   const [sampleIdx, setSampleIdx] = useState(0);
   // 4. 목소리
   const [melodyMode, setMelodyMode] = useState<"new" | "hum">("new");
+  // 노래 엔진: 서버에 ACE-Step 이 준비돼 있으면 'AI 노래'를 고를 수 있어요
+  const [songReady, setSongReady] = useState(false);
+  const [engine, setEngine] = useState<"classic" | "ace">("classic");
+  const [humStrength, setHumStrength] = useState(0.5);
   const [hum, setHum] = useState<AudioSource | null>(null);
 
   const [voice, setVoice] = useState<AudioSource | null>(null);
@@ -93,7 +97,19 @@ export default function PracticePage() {
   const [head, setHead] = useState<number | null>(null);
 
   useEffect(() => {
-    getGpuConfig().then(setGpu);
+    getGpuConfig().then((cfg) => {
+      setGpu(cfg);
+      if (!cfg.enabled || !cfg.url) return;
+      fetch(`${cfg.url}/health`)
+        .then((r) => r.json())
+        .then((h) => {
+          if (h.song_ready) {
+            setSongReady(true);
+            setEngine("ace");
+          }
+        })
+        .catch(() => {});
+    });
     const v = getRegisteredVoice();
     if (v) setVoice(v);
     // 원곡 페이지에서 원곡을 들으며 부른 녹음을 넘겨받았으면 그 멜로디로 만들어요
@@ -166,7 +182,10 @@ export default function PracticePage() {
       const cfg = await getGpuConfig();
       if (!cfg.enabled) throw new Error("GPU 서버가 연결되어 있지 않아 연습곡을 만들 수 없어요.");
       setGen({ kind: "running", step: 0 });
-      const one = estimateSeconds({ lyrics: lyricsOn, voice: voiceMode !== "none" && !!voice, hum: melodyMode === "hum" });
+      const one =
+        songReady && engine === "ace"
+          ? 90 + (voiceMode !== "none" && voice ? 45 : 0)
+          : estimateSeconds({ lyrics: lyricsOn, voice: voiceMode !== "none" && !!voice, hum: melodyMode === "hum" });
       // 앞에 기다리는 작업이 있으면 그만큼 더 (한 작업당 같은 시간으로 어림)
       const ahead = await fetch(`${cfg.url}/health`)
         .then((r) => r.json())
@@ -184,6 +203,8 @@ export default function PracticePage() {
           lyrics: lyricsOn ? lyrics : undefined,
           voice: voiceMode !== "none" && voice ? { blob: voice.blob, name: voice.name } : null,
           hum: melodyMode === "hum" && hum ? { blob: hum.blob, name: hum.name } : null,
+          engine: songReady ? engine : "classic",
+          humStrength: melodyMode === "hum" ? humStrength : undefined,
         },
         (p) => setGen({ kind: "running", step: 0, detail: `${Math.round(p * 100)}%` }),
       );
@@ -369,6 +390,42 @@ export default function PracticePage() {
                 ["새로 짓기", melodyMode === "new", () => setMelodyMode("new")],
               ]}
             />
+            {songReady && (
+              <div className="mt-4">
+                <Toggle
+                  label="노래 엔진"
+                  options={[
+                    ["AI 노래 (새 엔진)", engine === "ace", () => setEngine("ace")],
+                    ["기본", engine === "classic", () => setEngine("classic")],
+                  ]}
+                />
+                <p className="mt-1 text-xs text-muted">
+                  {engine === "ace"
+                    ? "AI가 반주와 노래를 한 번에 만들어 진짜 노래처럼 들려요. 멜로디는 허밍을 참고해서 AI가 다듬어요(시험 중)."
+                    : "멜로디를 그대로 지키지만, 읽기 음성을 늘여 부르는 방식이라 기계음처럼 들릴 수 있어요."}
+                </p>
+              </div>
+            )}
+            {melodyMode === "hum" && songReady && engine === "ace" && (
+              <div className="mt-4">
+                <div className="flex justify-between text-sm">
+                  <label htmlFor="humStrength" className="font-semibold">
+                    허밍 따르기
+                  </label>
+                  <span className="text-muted">{humStrength >= 0.75 ? "허밍 그대로" : humStrength <= 0.35 ? "AI가 자유롭게" : "균형"}</span>
+                </div>
+                <input
+                  id="humStrength"
+                  type="range"
+                  min={0.2}
+                  max={1}
+                  step={0.05}
+                  value={humStrength}
+                  onChange={(e) => setHumStrength(Number(e.target.value))}
+                  className="mt-2 w-full accent-guide"
+                />
+              </div>
+            )}
             {melodyMode === "hum" && (
               <div className="mt-4 space-y-3">
                 {picked ? (
@@ -550,7 +607,12 @@ export default function PracticePage() {
           )}
           {gen.kind !== "done" && gen.kind !== "running" && (
             <p className="mt-2 text-sm text-muted">
-              예상 시간 약 {fmtDuration(estimateSeconds({ lyrics: lyricsOn, voice: voiceMode !== "none" && !!voice, hum: melodyMode === "hum" }))}
+              예상 시간 약{" "}
+              {fmtDuration(
+                songReady && engine === "ace"
+                  ? 90 + (voiceMode !== "none" && voice ? 45 : 0)
+                  : estimateSeconds({ lyrics: lyricsOn, voice: voiceMode !== "none" && !!voice, hum: melodyMode === "hum" }),
+              )}
               {lyricsOn ? " (가사 노래 만들기가 대부분이에요)" : ""}. 다른 사람 작업이 먼저 있으면 더 걸려요.
             </p>
           )}

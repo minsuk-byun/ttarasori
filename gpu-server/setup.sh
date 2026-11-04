@@ -127,6 +127,40 @@ if [ ! -f /opt/melo-ok ]; then
   ) &
 fi
 
+# ACE-Step 1.5 (노래 전체 생성, MIT): Python 3.11·최신 PyTorch 가 필요해서 따로 설치하고, 뒤에서 자체 API(127.0.0.1:8001)로 띄워요.
+# 실패해도 연습곡은 예전 방식으로 동작해요. 설치 기록: /opt/ace-install.log, 실행 기록: /opt/ace-api.log
+(
+  log "ACE-Step 설치 시작 (뒤에서 진행): GPU $(nvidia-smi --query-gpu=driver_version,memory.total,memory.used --format=csv,noheader 2>/dev/null | head -1)"
+  if timeout 3600 bash -c '
+    set -e
+    export UV_CACHE_DIR=/opt/uv-cache UV_PYTHON_INSTALL_DIR=/opt/uv-python HF_HOME=/opt/hf-cache
+    pip install -q --no-cache-dir uv
+    command -v python3.11 >/dev/null 2>&1 || (apt-get install -y -qq python3.11 python3.11-venv python3.11-dev >/dev/null 2>&1 || true)
+    if [ ! -d /opt/ace-step/.git ]; then
+      for i in 1 2 3; do timeout 300 git clone -q --depth 1 https://github.com/ACE-Step/ACE-Step-1.5.git /opt/ace-step && break; rm -rf /opt/ace-step; sleep 20; done
+    fi
+    cd /opt/ace-step
+    for i in 1 2 3; do uv sync --python 3.11 && break; [ $i = 3 ] && exit 1; sleep $((i * 30)); done
+    .venv/bin/python -c "import torch; print(\"ace torch\", torch.__version__, torch.cuda.is_available())"
+  ' > /opt/ace-install.log 2>&1; then
+    log "ACE-Step 설치 완료, API 시작"
+    cd /opt/ace-step && \
+      ACESTEP_API_HOST=127.0.0.1 ACESTEP_API_PORT=8001 ACESTEP_DEVICE=cuda \
+      ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=true ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B \
+      ACESTEP_LM_BACKEND=pt ACESTEP_OFFLOAD_TO_CPU=true ACESTEP_DOWNLOAD_SOURCE=huggingface \
+      HF_HOME=/opt/hf-cache UV_CACHE_DIR=/opt/uv-cache \
+      nohup .venv/bin/acestep-api > /opt/ace-api.log 2>&1 &
+    # 모델 내려받기·불러오기가 끝나 API 가 응답하면 표시해요 (최대 40분)
+    for i in $(seq 1 240); do
+      if python3 -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8001/v1/models', timeout=5)" >/dev/null 2>&1; then touch /opt/ace-ok; log "ACE-Step 준비 완료"; break; fi
+      sleep 10
+    done
+    [ -f /opt/ace-ok ] || log "ACE-Step API 가 응답하지 않아요: $(tail -3 /opt/ace-api.log | tr '\n' ' ' | cut -c1-300)"
+  else
+    log "ACE-Step 설치 실패 (예전 방식으로 동작): $(tail -4 /opt/ace-install.log | tr '\n' ' ' | cut -c1-400)"
+  fi
+) &
+
 # 큰 파일(모델·캐시)은 /root 밖(/opt)에 둬요.
 # /root 는 Workspace 를 중지할 때 저장·복원되는데, 모델까지 들어가면 복원하다 디스크가 가득 차서 서버가 못 떠요.
 rm -rf /root/seed-vc /root/.cache/huggingface 2>/dev/null || true

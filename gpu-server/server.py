@@ -231,6 +231,102 @@ def write_outputs(d: Path, vocal: np.ndarray, backing: np.ndarray, backing_gain:
         )
 
 
+def _ace_key(info: dict) -> str:
+    k = info.get("key") or ""
+    if not k:
+        return ""
+    return (k[:-1] + " minor") if k.endswith("m") else (k + " major")
+
+
+def run_ace(job_id: str):
+    """ACE-Step 으로 노래 전체 만들기 → 보컬 분리(채점·가이드용) → (원하면) 내 목소리로 바꾸기"""
+    import hum
+    import sing
+    import song
+
+    job = jobs[job_id]
+    d = Path(job["dir"])
+    hum_info = None
+    bpm, key, seconds = job["bpm"], "", 45.0
+    if job.get("hum"):
+        set_step(job_id, "허밍에서 빠르기·조성 읽기", 0.05)
+        _n, _t, _k, hum_info = hum.extract(Path(job["hum"]), job["bpm"], job["low"])
+        bpm, key, seconds = hum_info["bpm"], _ace_key(hum_info), max(20.0, hum_info["hum_seconds"])
+    set_step(job_id, "AI가 노래 부르고 연주하기", 0.15)
+    info = song.generate(
+        d / "song.wav",
+        job["prompt"],
+        job.get("lyrics") or "",
+        job["low"],
+        seconds,
+        bpm=bpm,
+        keyscale=key,
+        src_audio=Path(job["hum"]) if job.get("hum") else None,
+        strength=float(job.get("hum_strength", 0.5)),
+        seed=int(job.get("seed", -1)),
+        log=lambda m: print(m, flush=True),
+    )
+
+    set_step(job_id, "보컬과 반주 나누기", 0.7)
+    voc_p, inst_p = separate(d / "song.wav", d / "sep")
+
+    # 채점·노래방 화면용 음표: 분리한 보컬에서 읽어요 (허밍 분석과 같은 방법)
+    set_step(job_id, "멜로디 읽기", 0.8)
+    notes, total, tonic = [], 0.0, 60
+    try:
+        notes, total, tonic, _vi = hum.extract(voc_p, bpm, job["low"], max_sec=120)
+        syls = sing.syllables(job.get("lyrics") or "")
+        if syls:
+            notes = sing.fit_notes_keep(notes, len(syls))
+            for nt, sy in zip(notes, syls):
+                nt["syllable"] = sy
+    except Exception as e:  # noqa: BLE001
+        print(f"[ttarasori] 보컬 음표 읽기 실패(노래는 그대로 써요): {e}", flush=True)
+
+    vocal, _ = librosa.load(str(voc_p), sr=SR, mono=True)
+    if job.get("voice"):
+        set_step(job_id, "내 목소리로 바꾸기", 0.85)
+        mine = convert(voc_p, to_voice_ref(job, d), 0, job["steps"])
+        mine = mine * ((float(np.sqrt(np.mean(vocal**2))) or 1e-6) / (float(np.sqrt(np.mean(mine**2))) or 1e-6))
+        inst, _ = librosa.load(str(inst_p), sr=SR, mono=False)
+        inst = inst if inst.ndim == 2 else np.stack([inst, inst])
+        n = max(inst.shape[1], len(mine))
+        mix = np.zeros((2, n), dtype=np.float32)
+        mix[:, : inst.shape[1]] += inst
+        mix[:, : len(mine)] += mine[None, :]
+        mix /= max(1.0, float(np.max(np.abs(mix))) / 0.98)
+        sf.write(d / "mix.wav", mix.T, SR)
+        vocal = mine
+    else:
+        song_audio, ssr = sf.read(str(d / "song.wav"), always_2d=True)
+        sf.write(d / "mix.wav", song_audio, ssr)
+    sf.write(d / "vocals.wav", (vocal / max(1e-6, float(np.max(np.abs(vocal)))) * 0.9).astype(np.float32), SR)
+    for src, dst in (("mix.wav", "mix.mp3"), ("vocals.wav", "vocals.mp3")):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(d / src), "-b:a", "192k", str(d / dst)], check=True)
+
+    dur = float(sf.info(str(d / "mix.wav")).duration)
+    (d / "notes.json").write_text(
+        json.dumps(
+            {
+                "notes": notes,
+                "duration": dur,
+                "bpm": bpm,
+                "tonic": tonic,
+                "lyrics": bool(job.get("lyrics")),
+                "sung": True,
+                "sing_error": None,
+                "sing_info": None,
+                "melody_source": "hum" if hum_info else "ace",
+                "hum_info": hum_info,
+                "engine": "ace",
+                "ace": info,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def run_practice(job_id: str):
     from melody import make_melody, render_melody
 
@@ -425,7 +521,15 @@ def run_job(job_id: str):
             return
         if job.get("kind") == "practice":
             job["status"] = "running"
-            run_practice(job_id)
+            import song
+
+            if job.get("engine") == "ace" and song.ready():
+                run_ace(job_id)
+            else:
+                if job.get("engine") == "ace":
+                    print("[ttarasori] ACE-Step 이 아직 준비되지 않아 예전 방식으로 만들어요", flush=True)
+                    job["engine"] = "classic"
+                run_practice(job_id)
             job.update(status="done", step="완료", progress=1.0)
             return
         job["status"] = "running"
@@ -567,6 +671,7 @@ def health():
         "pronounce_ready": _pronounce_ready(),
         "melo_ready": os.path.exists("/opt/melo-ok"),
         "hum_melody": True,
+        "song_ready": os.path.exists("/opt/ace-ok"),
         "queue": queue.qsize(),
         "tunnel_url": tunnel.read_text().strip() if tunnel.exists() else None,
     }
@@ -669,6 +774,8 @@ async def create_practice(
     lyrics: str = Form(""),
     voice: UploadFile | None = File(None),
     hum: UploadFile | None = File(None),
+    engine: str = Form("classic"),
+    hum_strength: float = Form(0.5),
 ):
     """원곡 '느낌'(텍스트 설명)으로 연습곡 만들기. 원곡 음원은 받지 않아요.
     hum: 사용자가 직접 부른 허밍 녹음 (있으면 그 멜로디·빠르기로 만들어요)"""
@@ -697,6 +804,8 @@ async def create_practice(
         "dir": str(d),
         "voice": str(voice_path) if voice_path else None,
         "hum": str(hum_path) if hum_path else None,
+        "engine": "ace" if engine == "ace" else "classic",
+        "hum_strength": max(0.1, min(1.0, hum_strength)),
         "prompt": prompt,
         "bpm": bpm,
         "minor": minor,

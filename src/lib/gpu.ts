@@ -107,6 +107,10 @@ export interface PracticeRequest {
   voice?: { blob: Blob; name: string } | null;
   /** 내가 직접 부른 허밍 (있으면 그 멜로디·빠르기로 연습곡을 만들어요) */
   hum?: { blob: Blob; name: string } | null;
+  /** 노래 엔진: classic(읽기 음성을 노래로) / ace(ACE-Step 으로 노래 전체 생성) */
+  engine?: "classic" | "ace";
+  /** ace + 허밍: 허밍을 얼마나 따를지 (0.1~1.0) */
+  humStrength?: number;
 }
 
 export function createPracticeJob(cfg: GpuConfig, req: PracticeRequest, onUpload: (p: number) => void): Promise<string> {
@@ -120,6 +124,8 @@ export function createPracticeJob(cfg: GpuConfig, req: PracticeRequest, onUpload
     if (req.lyrics) fd.append("lyrics", req.lyrics);
     if (req.voice) fd.append("voice", req.voice.blob, req.voice.name.includes(".") ? req.voice.name : `${req.voice.name}.webm`);
     if (req.hum) fd.append("hum", req.hum.blob, req.hum.name.includes(".") ? req.hum.name : `${req.hum.name}.webm`);
+    if (req.engine) fd.append("engine", req.engine);
+    if (req.humStrength != null) fd.append("hum_strength", String(req.humStrength));
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${cfg.url}/practice`);
     xhr.setRequestHeader("Authorization", `Bearer ${cfg.token}`);
@@ -152,6 +158,8 @@ export interface PracticeNotes {
   /** 멜로디를 어디서 가져왔는지: 새로 지음 / 내 허밍 (예전 서버는 이 값이 없어요) */
   melody_source?: "new" | "hum";
   hum_info?: { notes: number; bpm: number; key: string; minor: boolean; hum_seconds: number } | null;
+  /** 어떤 엔진으로 만들었는지 (ace: ACE-Step 노래 생성) */
+  engine?: "classic" | "ace";
 }
 
 export async function getNotes(cfg: GpuConfig, id: string): Promise<PracticeNotes> {
