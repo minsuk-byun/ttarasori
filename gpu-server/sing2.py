@@ -316,6 +316,29 @@ def clarity(y: np.ndarray, sr: int, orig: list[str], pron: list[str]) -> float |
     return None if h is None else _ratio(orig, pron, h)
 
 
+def _matched(expect: list[str], heard: list[str]) -> list[bool]:
+    """기대한 글자마다 인식 결과에서 짝을 찾았는지 (순서를 지키는 최장 일치)"""
+    hit = [False] * len(expect)
+    for a, _, size in SequenceMatcher(None, expect, heard, autojunk=False).get_matching_blocks():
+        for i in range(a, a + size):
+            hit[i] = True
+    return hit
+
+
+def line_scores(heard: list[str], orig: list[str], pron: list[str], groups: list[list[int]]) -> list[float]:
+    """노래 전체를 한 번 인식한 결과를 가사와 맞춰서 줄마다 알아들은 글자 비율.
+    줄마다 1~2초 조각을 따로 인식하면 짧아서 인식기가 자주 놓쳐요(전체는 완벽한데 셋째 줄 0.13).
+    원래 글자·소리 나는 글자 중 더 잘 맞는 쪽으로 글자마다 판단해요."""
+    ho, hp = _matched(orig, heard), _matched(pron, heard)
+    out = []
+    for g in groups:
+        if not g:
+            out.append(0.0)
+            continue
+        out.append(sum(1 for i in g if ho[i] or hp[i]) / len(g))
+    return out
+
+
 LINE_GOOD = 0.75
 RETRY_BUDGET = float(os.environ.get("SING_RETRY_BUDGET", "75"))  # 초
 
@@ -376,17 +399,17 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
         finally:
             print(f"[ttarasori] 시간: 노래 합성 {time.time() - t1:.1f}초", flush=True)
 
-    def line_score(y, li):
-        g = groups[li]
-        a = max(0, int((notes[g[0]]["start"] - 0.35) * sr))
-        b = min(len(y), int((notes[g[-1]]["start"] + notes[g[-1]]["dur"] + 0.35) * sr))
+    def score_all(y):
+        """노래 전체를 한 번 인식 → (전체 또렷함, 줄별 또렷함). 인식기가 없으면 (None, [None…])"""
         t1 = time.time()
-        h = _heard(y[a:b], sr)
-        print(f"[ttarasori] 시간: {li + 1}줄 듣기 {time.time() - t1:.1f}초", flush=True)
-        return None if h is None else _ratio([orig[i] for i in g], [pron[i] for i in g], h)
+        h = _heard(y, sr)
+        print(f"[ttarasori] 시간: 전체 듣기 {time.time() - t1:.1f}초", flush=True)
+        if h is None:
+            return None, [None] * len(groups)
+        return _ratio(orig, pron, h), line_scores(h, orig, pron, groups)
 
     y = build(choice)
-    scores = [line_score(y, li) for li in range(len(groups))]
+    total_c, scores = score_all(y)
     swaps = 0
     # 2) 덜 또렷한 줄만 다른 방법으로
     if all(s is not None for s in scores):
@@ -401,12 +424,12 @@ def sing_best(notes: list[dict], total: float, sr: int, line_syls: list[list[str
                     continue
                 trial = choice[:li] + [m] + choice[li + 1:]
                 y2 = build(trial)
-                s2 = line_score(y2, li)
-                print(f"[ttarasori] 가사 {li + 1}줄 {choice[li]}→{m}: {scores[li]:.2f}→{s2}", flush=True)
-                if s2 is not None and s2 > scores[li] + 0.05:
-                    choice, y, scores[li] = trial, y2, s2
+                c2, s2 = score_all(y2)
+                print(f"[ttarasori] 가사 {li + 1}줄 {choice[li]}→{m}: {scores[li]:.2f}→{s2[li]}", flush=True)
+                # 그 줄이 나아지고 다른 줄이 크게 나빠지지 않을 때만 바꿔요
+                if s2[li] is not None and s2[li] > scores[li] + 0.05 and (c2 or 0) >= (total_c or 0) - 0.03:
+                    choice, y, scores, total_c = trial, y2, s2, c2
                     swaps += 1
-    total_c = clarity(y, sr, orig, pron)
     print(f"[ttarasori] 가사 노래 완성: 또렷함 {total_c}, 줄별 {scores}, 바꾼 줄 {swaps}, {time.time() - t0:.0f}초", flush=True)
     engines = sorted({m[0] for m in choice})
     return y, {
