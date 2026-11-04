@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AudioInput from "@/components/AudioInput";
+import SingAlongHum from "@/components/SingAlongHum";
 import { PianoRoll } from "@/components/Charts";
 import VoiceSetup from "@/components/VoiceSetup";
 import {
@@ -327,24 +328,26 @@ export default function PracticePage() {
               ]}
             />
             {melodyMode === "hum" && (
-              <div className="mt-4">
+              <div className="mt-4 space-y-3">
+                {picked ? (
+                  <SingAlongHum video={picked} onDone={setHum} />
+                ) : (
+                  <p className="rounded-xl bg-surface p-3 text-sm text-muted">1단계에서 유튜브 원곡을 고르면, 여기서 원곡을 틀고 바로 따라 불러서 쓸 수 있어요.</p>
+                )}
                 <AudioInput
                   label="내 허밍"
-                  hint="원곡 멜로디를 떠올리며 '라라라'나 '음~'으로 10~30초 불러 주세요. 음마다 살짝 끊어 부르면 더 정확해요."
+                  hint={
+                    hum
+                      ? "이 녹음의 멜로디로 연습곡을 만들어요. 들어 보고 마음에 안 들면 다시 불러 주세요."
+                      : "원곡 없이 직접 녹음하거나 파일을 올려도 돼요. '라라라'나 '음~'으로 10~30초, 음마다 살짝 끊어 부르면 더 정확해요."
+                  }
                   tone="mine"
                   value={hum}
                   onChange={setHum}
                   allowRecord
                 />
                 <ul className="mt-3 space-y-1 text-xs leading-relaxed text-muted">
-                  <li>
-                    · 원곡을 들으면서 따라 부르고 싶으면{" "}
-                    <a href="/original" className="font-semibold text-guide underline">
-                      원곡으로 따라 부르기
-                    </a>
-                    에서 이어폰을 끼고 부른 뒤 &lsquo;이 녹음의 멜로디로 연습곡 만들기&rsquo;를 눌러 주세요.
-                  </li>
-                  <li>· 여기서 바로 녹음할 때는 원곡을 끄고 조용한 곳에서 불러 주세요. 원곡 소리가 섞이면 멜로디를 잘못 읽어요. 처음 30초까지 써요.</li>
+                  <li>· 원곡 소리가 녹음에 섞이면 멜로디를 잘못 읽어요. 이어폰을 끼거나 원곡을 끄고 조용한 곳에서 불러 주세요. 처음 30초까지 써요.</li>
                   <li>· 빠르기와 조성은 허밍을 따라가요. 아래 빠르기·조성 설정은 허밍에서 알아내기 어려울 때만 써요.</li>
                   <li>· 내가 부른 멜로디가 원곡과 같다면 그 멜로디는 원곡 작곡가의 것이에요. 혼자 연습할 때만 써 주세요.</li>
                 </ul>
