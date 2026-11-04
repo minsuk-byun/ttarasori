@@ -120,6 +120,8 @@ export default function PracticePage() {
   function pick(v: Video) {
     setPicked(v);
     setStyle(v.style);
+    // 원곡을 고르면 바로 따라 불러서 멜로디로 쓸 수 있게 '내 허밍으로'를 먼저 보여 줘요
+    setMelodyMode("hum");
   }
 
   const prompt = useMemo(() => stylePrompt(style), [style]);
@@ -323,8 +325,8 @@ export default function PracticePage() {
             <Toggle
               label="멜로디"
               options={[
-                ["새로 짓기", melodyMode === "new", () => setMelodyMode("new")],
                 ["내 허밍으로", melodyMode === "hum", () => setMelodyMode("hum")],
+                ["새로 짓기", melodyMode === "new", () => setMelodyMode("new")],
               ]}
             />
             {melodyMode === "hum" && (
