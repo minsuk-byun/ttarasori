@@ -37,6 +37,23 @@ type Gen =
   | { kind: "done"; mixUrl: string; mix: Blob; vocals: Blob | null; notes: PracticeNotes | null; warn?: string }
   | { kind: "error"; msg: string };
 
+/** 예상 걸리는 시간(초). GPU 서버(RTX 3090)에서 잰 값 기준:
+ *  가사 노래 포함 163~180초, 가사 없이 반주만이면 1분 남짓, 내 목소리 변환은 조금 더. */
+function estimateSeconds(o: { lyrics: boolean; voice: boolean; hum: boolean }): number {
+  let t = o.lyrics ? 175 : 90;
+  if (o.hum) t += 5;
+  if (o.voice) t += 45;
+  return t;
+}
+
+function fmtDuration(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  if (s < 60) return `${s}초`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r >= 10 ? `${m}분 ${r}초` : `${m}분`;
+}
+
 export default function PracticePage() {
   const router = useRouter();
   const [gpu, setGpu] = useState<GpuConfig | null>(null);
@@ -63,6 +80,14 @@ export default function PracticePage() {
   // 5. 만들기
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 100000));
   const [gen, setGen] = useState<Gen>({ kind: "idle" });
+  // 예상 시간: 시작 시각과 예상 총 시간(초). 1초마다 다시 그려서 남은 시간을 보여 줘요
+  const [eta, setEta] = useState<{ start: number; total: number } | null>(null);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (gen.kind !== "running") return;
+    const iv = window.setInterval(() => setTick((x) => x + 1), 1000);
+    return () => clearInterval(iv);
+  }, [gen.kind]);
   const alive = useRef(true);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [head, setHead] = useState<number | null>(null);
@@ -141,6 +166,13 @@ export default function PracticePage() {
       const cfg = await getGpuConfig();
       if (!cfg.enabled) throw new Error("GPU 서버가 연결되어 있지 않아 연습곡을 만들 수 없어요.");
       setGen({ kind: "running", step: 0 });
+      const one = estimateSeconds({ lyrics: lyricsOn, voice: voiceMode !== "none" && !!voice, hum: melodyMode === "hum" });
+      // 앞에 기다리는 작업이 있으면 그만큼 더 (한 작업당 같은 시간으로 어림)
+      const ahead = await fetch(`${cfg.url}/health`)
+        .then((r) => r.json())
+        .then((h) => Number(h.queue) || 0)
+        .catch(() => 0);
+      setEta({ start: Date.now(), total: one * (1 + ahead) });
       const id = await createPracticeJob(
         cfg,
         {
@@ -508,6 +540,15 @@ export default function PracticePage() {
               연습곡 만들기
             </button>
           )}
+          {gen.kind !== "done" && gen.kind !== "running" && (
+            <p className="mt-2 text-sm text-muted">
+              예상 시간 약 {fmtDuration(estimateSeconds({ lyrics: lyricsOn, voice: voiceMode !== "none" && !!voice, hum: melodyMode === "hum" }))}
+              {lyricsOn ? " (가사 노래 만들기가 대부분이에요)" : ""}. 다른 사람 작업이 먼저 있으면 더 걸려요.
+            </p>
+          )}
+          {gen.kind === "running" && eta && (
+            <EtaBar start={eta.start} total={eta.total} />
+          )}
           {gen.kind === "running" && (
             <ul className="mt-4 space-y-2" role="status">
               {STEPS.map((s, i) => (
@@ -639,6 +680,29 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
     >
       {children}
     </button>
+  );
+}
+
+/** 남은 예상 시간 막대. 예상을 넘기면 '거의 다 됐어요'로 바꿔서 숫자가 음수가 되지 않게 해요 */
+function EtaBar({ start, total }: { start: number; total: number }) {
+  const elapsed = (Date.now() - start) / 1000;
+  const left = total - elapsed;
+  const pct = Math.min(97, (elapsed / total) * 100);
+  return (
+    <div className="mt-4">
+      <div className="flex justify-between text-sm">
+        <span className="font-semibold">{left > 5 ? `남은 시간 약 ${fmtDuration(left)}` : "거의 다 됐어요"}</span>
+        <span className="tabular-nums text-muted">
+          {fmtDuration(elapsed)} / 예상 {fmtDuration(total)}
+        </span>
+      </div>
+      <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-line">
+        <div className="h-full rounded-full bg-guide transition-[width] duration-1000" style={{ width: `${pct}%` }} />
+      </div>
+      {left <= 5 && elapsed > total + 30 && (
+        <p className="mt-1 text-xs text-muted">예상보다 조금 더 걸리고 있어요. 서버가 바쁘거나 가사 노래를 한 번 더 다듬는 중일 수 있어요.</p>
+      )}
+    </div>
   );
 }
 
