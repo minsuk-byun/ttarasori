@@ -198,6 +198,23 @@ def to_voice_ref(job: dict, d: Path) -> Path:
     return voice_wav
 
 
+def write_practice_outputs(d: Path, vocal: np.ndarray, backing: np.ndarray):
+    """연습곡: 믹싱·마스터링(밝게, 공간감, 스테레오)해서 내보내요. vocals 는 리버브 없이(채점용)"""
+    import master
+
+    try:
+        mix, dry = master.master_practice(vocal, backing, SR)
+    except Exception:  # noqa: BLE001
+        print("[ttarasori] 마스터링 실패, 예전 방식으로:\n" + traceback.format_exc()[-1200:], flush=True)
+        write_outputs(d, vocal, backing, backing_gain=1.0)
+        return
+    peak = float(np.max(np.abs(dry))) or 1.0
+    sf.write(d / "vocals.wav", (dry / peak * 0.9).astype(np.float32), SR)
+    sf.write(d / "mix.wav", mix, SR)
+    for src, dst in (("mix.wav", "mix.mp3"), ("vocals.wav", "vocals.mp3")):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(d / src), "-b:a", "192k", str(d / dst)], check=True)
+
+
 def write_outputs(d: Path, vocal: np.ndarray, backing: np.ndarray, backing_gain: float = 0.9):
     n = max(len(backing), len(vocal))
     mix = np.zeros(n, dtype=np.float32)
@@ -342,11 +359,8 @@ def run_practice(job_id: str):
         vocal = guide_src if sung else melody44 * 2.2
 
     set_step(job_id, "합치기", 0.92)
-    # 가이드 보컬이 반주를 덮지 않게 음량 맞추기 (보컬 RMS ≈ 반주 RMS × 1.4)
-    b_rms = float(np.sqrt(np.mean(np.square(backing)))) or 1e-6
-    v_rms = float(np.sqrt(np.mean(np.square(vocal)))) or 1e-6
-    vocal = vocal * (b_rms * 1.4 / v_rms)
-    write_outputs(d, vocal.astype(np.float32), backing, backing_gain=1.0)
+    # 음량 맞추기·EQ·공간감·스테레오는 master.py 에서
+    write_practice_outputs(d, vocal.astype(np.float32), backing.astype(np.float32))
 
 
 def run_tune(job_id: str):

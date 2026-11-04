@@ -245,6 +245,10 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             coda_src = np.arange(max(fs + on + 1, fe - coda), fe)
 
             dur = max(0.08, nt["dur"] - 0.02)
+            # 줄 끝 글자는 조금 일찍 놓고 숨 쉴 틈을 줘요. 끝까지 꽉 채우면 노래가 늘어지고 답답하게 들려요
+            line_end = k == idxs[-1]
+            if line_end and dur > 0.35:
+                dur = max(0.3, dur * 0.82)
             want = int(dur / FRAME)
             # 자음은 박 앞에. 앞 음과 붙어 있으면 앞 음 끝을 최대 60ms(앞 음 길이의 35%)까지 빌려서라도
             # 자음 길이를 지켜요. 자음이 눌리면 '너는 잘했어' 같은 빽빽한 곳이 뭉개져요.
@@ -275,10 +279,20 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
                 h = _bend_hz(nt, nt["start"] + tt) if bends else hz  # 한 글자를 여러 음으로 끌어 부르기
                 if in_nuc and legato and tt < 0.04:  # 앞 음에서 부드럽게 이어 올라가기
                     h = prev_hz * (h / prev_hz) ** (tt / 0.04)
-                if in_nuc and dur > 0.8 and tt > 0.35 and not bends:  # 긴 음 비브라토
-                    h *= 2 ** ((22 * min(1, (tt - 0.35) / 0.25) * np.sin(2 * np.pi * 5.4 * tt)) / 1200)
+                # 비브라토: 한 음(끌어 부르는 곳은 그 음 조각)을 0.3초 넘게 길게 낼 때만, 천천히 깊어지게
+                seg_t = tt - max([0.0] + [b0 - nt["start"] for b0, _ in bends if b0 - nt["start"] <= tt])
+                if in_nuc and dur > 0.6 and seg_t > 0.3:
+                    h *= 2 ** ((28 * min(1, (seg_t - 0.3) / 0.25) * np.sin(2 * np.pi * 5.5 * seg_t)) / 1200)
                 out_f0[o] = h if (in_nuc or f0[si] > 0) else 0.0
-                mask[o] = 1.0
+                # 소리 크기 모양: 긴 음은 처음보다 끝이 살짝 작아지고, 줄 끝은 마지막 30% 동안 부드럽게 사라져요
+                g = 1.0
+                if in_nuc and dur > 0.5:
+                    g -= 0.18 * min(1.0, tt / dur)
+                if line_end and q >= on_out:
+                    left = dur - tt
+                    if left < dur * 0.3:
+                        g *= max(0.25, left / (dur * 0.3))  # 받침이 안 사라지게 25% 아래로는 안 줄여요
+                mask[o] = g
             prev_start = nt["start"]
             prev_end = nt["start"] + dur
             prev_hz = 440.0 * 2 ** (((bends[-1][1] if bends else nt["midi"]) - 69) / 12)

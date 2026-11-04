@@ -34,7 +34,7 @@ const STEPS = ["요청 보내기", "멜로디 만들기", "가사로 노래 만�
 type Gen =
   | { kind: "idle" }
   | { kind: "running"; step: number; detail?: string }
-  | { kind: "done"; mixUrl: string; mix: Blob; vocals: Blob | null; notes: PracticeNotes | null; warn?: string }
+  | { kind: "done"; mixUrl: string; mix: Blob; vocals: Blob | null; notes: PracticeNotes | null; warn?: string; myVoice: boolean }
   | { kind: "error"; msg: string };
 
 /** 예상 걸리는 시간(초). GPU 서버(RTX 3090)에서 잰 값 기준:
@@ -201,7 +201,8 @@ export default function PracticePage() {
             melodyMode === "hum" && notes && notes.melody_source !== "hum"
               ? "GPU 서버가 아직 허밍 기능을 모르는 버전이라, 허밍 대신 새 멜로디로 만들었어요. 서버를 새로 시작하면 허밍을 쓸 수 있어요."
               : undefined;
-          setGen({ kind: "done", mixUrl: URL.createObjectURL(mix), mix, vocals, notes, warn });
+          const myVoice = voiceMode !== "none" && !!voice;
+          setGen({ kind: "done", mixUrl: URL.createObjectURL(mix), mix, vocals, notes, warn, myVoice });
           const genre = GENRES.find((g) => g.id === style.genre)?.label ?? "연습곡";
           const firstLine = lyricsOn ? lyrics.split("\n")[0].trim().slice(0, 20) : "";
           const title = firstLine
@@ -211,7 +212,7 @@ export default function PracticePage() {
               : picked
               ? `${picked.title.slice(0, 40)} 느낌 연습곡`
               : `${genre} 연습곡 (${style.bpm} BPM)`;
-          savePracticeSong({ title, mix, vocals, notes: notes?.notes ?? null });
+          savePracticeSong({ title: myVoice ? `${title} · 내 목소리` : title, mix, vocals, notes: notes?.notes ?? null });
           return;
         }
         const step =
@@ -575,7 +576,11 @@ export default function PracticePage() {
           {gen.kind === "done" && (
             <div className="mt-2 rounded-2xl bg-ink p-5 text-white">
               <div className="font-semibold">연습곡이 완성됐어요</div>
-              <div className="mt-0.5 text-sm text-white/60">이 브라우저에 저장했어요. AI 커버 만들기에서 &quot;내 연습곡에서 고르기&quot;로 다시 쓸 수 있어요.</div>
+              <div className="mt-0.5 text-sm text-white/60">
+                {gen.myVoice
+                  ? "내 목소리로 부른 가이드라서 이미 내 목소리 AI 커버예요. AI 커버를 따로 만들 필요 없이 바로 따라 부르고 비교하면 돼요. 이 브라우저에 저장했어요."
+                  : "합성 목소리로 부른 가이드예요. 이 브라우저에 저장했고, 내 목소리로 바꾸고 싶으면 아래 'AI 커버로 내 목소리 입히기'를 눌러 주세요."}
+              </div>
               <div className="mt-0.5 text-sm text-white/60">
                 {GENRES.find((g) => g.id === style.genre)?.label}, {gen.notes?.bpm ?? style.bpm} BPM
                 {gen.notes?.melody_source === "hum" ? ", 내 허밍 멜로디" : picked ? `, "${picked.title}" 느낌` : ""}
@@ -615,14 +620,23 @@ export default function PracticePage() {
               )}
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
-                  onClick={() => router.push("/cover?from=practice")}
-                  className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-ink hover:bg-white/90"
+                  onClick={goCompare}
+                  className={
+                    gen.myVoice
+                      ? "rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-ink hover:bg-white/90"
+                      : "rounded-lg bg-mine px-4 py-2.5 text-sm font-semibold hover:brightness-110"
+                  }
                 >
-                  다음 단계: 내 목소리로 AI 커버 만들기
-                </button>
-                <button onClick={goCompare} className="rounded-lg bg-mine px-4 py-2.5 text-sm font-semibold hover:brightness-110">
                   바로 따라 부르고 비교하기
                 </button>
+                {!gen.myVoice && (
+                  <button
+                    onClick={() => router.push("/cover?from=practice")}
+                    className="rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-ink hover:bg-white/90"
+                  >
+                    AI 커버로 내 목소리 입히기
+                  </button>
+                )}
                 <a href="/train?tab=game" className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20">
                   음정 게임으로 부르기
                 </a>
@@ -634,7 +648,7 @@ export default function PracticePage() {
                   }}
                   className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20"
                 >
-                  다른 멜로디로 다시 만들기
+                  {gen.notes?.melody_source === "hum" ? "같은 허밍으로 다시 만들기" : "다른 멜로디로 다시 만들기"}
                 </button>
                 <a href={gen.mixUrl} download="ttarasori-practice.mp3" className="rounded-lg bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20">
                   다운로드
