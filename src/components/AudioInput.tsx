@@ -22,7 +22,8 @@ export default function AudioInput({ label, hint, tone, value, onChange, allowRe
   const [mode, setMode] = useState<"idle" | "recording">("idle");
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
-  const [withGuide, setWithGuide] = useState(true);
+  // 가이드를 틀어 놓고 녹음할지는 사용자가 직접 고르게 해요 (스피커로 들으면 가이드가 녹음에 섞여요)
+  const [withGuide, setWithGuide] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rec = useRef<{ stop: () => void } | null>(null);
 
@@ -43,7 +44,8 @@ export default function AudioInput({ label, hint, tone, value, onChange, allowRe
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        // 가이드를 함께 틀 때는 브라우저 반향 제거를 켜서, 스피커로 나온 가이드 소리가 녹음에 덜 섞이게 해요
+        audio: { echoCancellation: withGuide && !!playAlong, noiseSuppression: false, autoGainControl: false },
       });
     } catch {
       setError("마이크를 쓸 수 없어요. 브라우저 주소창의 마이크 권한을 허용한 뒤 다시 눌러 주세요.");
@@ -112,6 +114,7 @@ export default function AudioInput({ label, hint, tone, value, onChange, allowRe
           <div className="flex items-center gap-3">
             <span className="h-3 w-3 animate-pulse rounded-full bg-mine" aria-hidden />
             <span className="font-semibold tabular-nums">녹음 중 {elapsed.toFixed(1)}초</span>
+            {withGuide && playAlong && <span className="text-sm text-muted">가이드 재생 중 · 이어폰으로 들어 주세요</span>}
             <button onClick={() => rec.current?.stop()} className="ml-auto rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">
               녹음 끝내기
             </button>
@@ -152,9 +155,12 @@ export default function AudioInput({ label, hint, tone, value, onChange, allowRe
             </button>
           )}
           {allowRecord && playAlong && (
-            <label className="flex w-full items-center gap-2 pt-1 text-sm text-muted">
-              <input type="checkbox" checked={withGuide} onChange={(e) => setWithGuide(e.target.checked)} className="accent-mine" />
-              가이드를 틀어 놓고 녹음 (이어폰을 끼면 가이드 소리가 녹음에 섞이지 않아요)
+            <label className="flex w-full items-start gap-2 pt-1 text-sm text-muted">
+              <input type="checkbox" checked={withGuide} onChange={(e) => setWithGuide(e.target.checked)} className="mt-1 accent-mine" />
+              <span>
+                가이드를 틀어 놓고 녹음해요. <b className="text-ink">이어폰을 꼈을 때만</b> 켜 주세요. 스피커로 들으면 가이드 소리가 녹음에 섞여서 내 노래가 아니라 가이드를
+                채점하게 돼요.
+              </span>
             </label>
           )}
         </div>
