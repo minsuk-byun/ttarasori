@@ -88,13 +88,18 @@ def yin(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
                 k += 1
         else:
             k = int(np.argmin(c))
-        t = k + tau_min
-        # 포물선 보간
-        if 1 <= t < tau_max:
-            a, b, cc = cmnd[i, t - 1], cmnd[i, t], cmnd[i, t + 1]
+        ti = k + tau_min
+        per[i] = 1 - float(cmnd[i, ti])
+        # 포물선 보간으로 소수점 주기 다듬기. 거의 무음·평평한 프레임에서는 분모가 0에 가까워
+        # 엉뚱한 값(수백만)이 나올 수 있어서, 이동은 ±0.5칸으로 묶고 숫자가 아니면 버려요
+        t = float(ti)
+        if 1 <= ti < tau_max:
+            a, b, cc = cmnd[i, ti - 1], cmnd[i, ti], cmnd[i, ti + 1]
             den = a - 2 * b + cc
-            t = t + (0.5 * (a - cc) / den if abs(den) > 1e-12 else 0.0)
-        per[i] = 1 - float(cmnd[i, int(round(t))])
+            if den > 1e-9:
+                off = 0.5 * (a - cc) / den
+                if np.isfinite(off):
+                    t += float(np.clip(off, -0.5, 0.5))
         f0[i] = SR / t if t > 0 else 0.0
     return f0, per, rms
 

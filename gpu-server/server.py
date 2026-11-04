@@ -227,7 +227,13 @@ def run_practice(job_id: str):
         import hum
 
         set_step(job_id, "허밍에서 멜로디 뽑기", 0.05)
-        notes, total, tonic, hum_info = hum.extract(Path(job["hum"]), job["bpm"], job["low"])
+        try:
+            notes, total, tonic, hum_info = hum.extract(Path(job["hum"]), job["bpm"], job["low"])
+        except hum.HumError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            print("[ttarasori] 허밍 분석 실패:\n" + traceback.format_exc()[-1500:], flush=True)
+            raise hum.HumError("허밍에서 멜로디를 읽지 못했어요. 다시 불러 보거나, 멜로디를 '새로 짓기'로 바꿔 주세요.") from e
         job["bpm"], job["minor"] = hum_info["bpm"], hum_info["minor"]
         print(f"[ttarasori] 허밍 멜로디: {hum_info}", flush=True)
     else:
