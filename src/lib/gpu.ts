@@ -140,7 +140,8 @@ export function createPracticeJob(cfg: GpuConfig, req: PracticeRequest, onUpload
 }
 
 export interface PracticeNotes {
-  notes: { midi: number; start: number; dur: number; syllable: string }[];
+  /** bends: 한 글자를 여러 음으로 끌어 부를 때 [시작 시각(초), midi] 목록 (허밍 멜로디) */
+  notes: { midi: number; start: number; dur: number; syllable: string; bends?: [number, number][] }[];
   duration: number;
   bpm: number;
   tonic: number;

@@ -161,6 +161,28 @@ def segment(midi: np.ndarray, rms: np.ndarray, hop: float) -> list[dict]:
     return [{"start": a * hop, "end": b * hop, "pitch": p} for a, b, p in notes]
 
 
+def clean_blips(notes: list[dict]) -> list[dict]:
+    """자음·숨 때문에 생긴 아주 짧은 음(0.12초 미만) 정리:
+    바로 붙은 이웃 음과 2반음 안쪽이면 그 음에 합쳐요(끌어올리기·글자 경계의 흔들림). 따로 떨어진 건 버려요."""
+    out: list[dict] = []
+    for nt in notes:
+        short = nt["end"] - nt["start"] < 0.12
+        if short and out and nt["start"] - out[-1]["end"] < 0.03 and abs(nt["pitch"] - out[-1]["pitch"]) <= 2:
+            out[-1]["end"] = nt["end"]
+            continue
+        out.append(dict(nt))
+    # 앞 음에 붙지 못한 짧은 음은 뒤 음의 시작으로 (끌어올리며 시작하는 경우)
+    res: list[dict] = []
+    for k, nt in enumerate(out):
+        if nt["end"] - nt["start"] < 0.12:
+            nxt = out[k + 1] if k + 1 < len(out) else None
+            if nxt and nxt["start"] - nt["end"] < 0.03 and abs(nt["pitch"] - nxt["pitch"]) <= 2:
+                nxt["start"] = nt["start"]
+            continue
+        res.append(nt)
+    return res
+
+
 def estimate_key(notes: list[dict]) -> tuple[int, bool]:
     """음표 길이로 가중한 음 이름 분포 → (으뜸음 음이름 0~11, 단조 여부) Krumhansl 프로필"""
     hist = np.zeros(12)
@@ -212,9 +234,9 @@ def estimate_bpm(onsets: list[float], fallback: int) -> int:
     return int(best_bpm)
 
 
-def quantize(notes: list[dict], bpm: int) -> list[dict]:
-    """16분음표 격자에 시작·끝 맞추기 (겹치지 않게, 한 음은 최소 16분음표 하나)"""
-    g = 60.0 / bpm / 4
+def quantize(notes: list[dict], bpm: int, div: int = 4) -> list[dict]:
+    """박을 div 칸으로 나눈 격자에 시작·끝 맞추기 (겹치지 않게, 한 음은 최소 한 칸)"""
+    g = 60.0 / bpm / div
     t0 = notes[0]["start"]
     out = []
     for nt in notes:
@@ -257,7 +279,7 @@ def extract(path: Path, fallback_bpm: int = 80, low: bool = True) -> tuple[list[
     filled = median_filter(np.nan_to_num(midi, nan=-1.0), size=5)
     midi = np.where(voiced & (filled > 0), filled, np.nan)
 
-    raw = segment(midi, rms, hop)
+    raw = clean_blips(segment(midi, rms, hop))
     if len(raw) < 4:
         raise HumError("허밍에서 음을 충분히 찾지 못했어요. 조용한 곳에서 '라라라'처럼 음을 또렷하게 끊어 불러 주세요.")
 
@@ -273,7 +295,15 @@ def extract(path: Path, fallback_bpm: int = 80, low: bool = True) -> tuple[list[
         nt["midi"] += shift
 
     bpm = estimate_bpm([nt["start"] for nt in raw], fallback_bpm)
-    notes = quantize(raw, bpm)
+    div = 4
+    iois = np.diff([nt["start"] for nt in raw])
+    iois = iois[(iois > 0.08) & (iois < 2.5)]
+    dense = len(iois) >= 4 and float(np.median(iois)) < 0.75 * 60.0 / bpm
+    if bpm > 100 and dense:
+        # 가사를 붙여 부르면 글자마다 음이 시작돼서 빠르기를 두 배로 읽기 쉬워요 (발라드 65 → 131).
+        # 절반 빠르기로 보고, 격자는 그만큼 잘게(32분음표) 해서 타이밍은 그대로 지켜요
+        bpm, div = bpm // 2, 8
+    notes = quantize(raw, bpm, div)
     notes = notes[:120]
     total = notes[-1]["start"] + notes[-1]["dur"] + 0.6
     tonic = tonic_pc + 12 * int(round((center - tonic_pc) / 12))

@@ -241,11 +241,25 @@ def run_practice(job_id: str):
         notes, total, tonic = make_melody(job["bpm"], job["minor"], job["low"], job["seed"])
     syls = sing.syllables(job.get("lyrics") or "")
     if syls:
-        notes = sing.ensure_min(sing.fit_notes(notes, len(syls)))
+        # 허밍 멜로디는 음을 합쳐 없애지 않고 한 글자를 여러 음에 걸쳐 불러요 (멜로디 그대로)
+        fit = sing.fit_notes_keep if hum_info else sing.fit_notes
+        notes = sing.ensure_min(fit(notes, len(syls)))
         for nt, sy in zip(notes, syls):
             nt["syllable"] = sy
-    melody32 = render_melody(notes, total, 32000)
-    melody44 = render_melody(notes, total, SR)
+    from melody import expand_bends
+
+    flat = expand_bends(notes)
+    melody32 = render_melody(flat, total, 32000)
+    melody44 = render_melody(flat, total, SR)
+
+    # AI 가이드 목소리(여성 읽기 목소리)가 편한 높이로 옥타브만 옮겨 불러요.
+    # 낮은 음역으로 끌어내리면 웅웅거리고 무섭게 들려요. 화면·비교용 음표는 그대로(비교는 옥타브를 보정해요)
+    mids = [m for nt in notes for m in [nt["midi"]] + [b[1] for b in nt.get("bends") or []]]
+    sing_shift = 12 * int(round((67 - float(np.median(mids))) / 12)) if mids else 0
+    sing_shift = max(-12, min(24, sing_shift))
+    sung_notes = [
+        dict(nt, midi=nt["midi"] + sing_shift, bends=[[t, m + sing_shift] for t, m in nt.get("bends") or []]) for nt in notes
+    ]
 
     # 반주는 멜로디만 있으면 만들 수 있어서, 가사 노래와 동시에 시작해요 (기다리는 시간 절약)
     import concurrent.futures as cf
@@ -274,13 +288,14 @@ def run_practice(job_id: str):
             import sing2
 
             # v2: 문장 단위 합성 + 글자 정렬 + 또렷함 검사
-            guide_src, sing_info = sing2.sing_best(notes, total, SR, line_syls, line_texts)
+            guide_src, sing_info = sing2.sing_best(sung_notes, total, SR, line_syls, line_texts)
+            sing_info["octave_shift"] = sing_shift
             sung = True
         except Exception as e:  # noqa: BLE001
             print("[ttarasori] 가사 노래 v2 실패, 예전 방식으로:\n" + traceback.format_exc()[-1500:], flush=True)
             sing_error = f"v2 {type(e).__name__}: {e}"[:200]
             try:
-                guide_src = sing.sing(notes, total, SR)
+                guide_src = sing.sing(expand_bends(sung_notes), total, SR)
                 sung = True
             except Exception as e2:  # noqa: BLE001
                 sing_error += f" / {type(e2).__name__}: {e2}"[:200]
@@ -319,7 +334,8 @@ def run_practice(job_id: str):
 
     if job.get("voice"):
         set_step(job_id, "내 목소리로 가이드 만들기", 0.6)
-        vocal = convert(d / "melody.wav", to_voice_ref(job, d), 0, job["steps"])
+        # 가사 노래는 옥타브를 옮겨 불렀으니 내 목소리로 바꿀 때 원래 높이로 되돌려요
+        vocal = convert(d / "melody.wav", to_voice_ref(job, d), -sing_shift if sung else 0, job["steps"])
         vpeak = float(np.max(np.abs(vocal))) or 1.0
         vocal = vocal / vpeak * 0.7
     else:

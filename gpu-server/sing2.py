@@ -262,6 +262,7 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
             src = np.concatenate([on_idx, nuc_idx, coda_idx]).clip(0, nf - 1)
             start_frame = int(round(nt["start"] / FRAME)) - on_out
             hz = 440.0 * 2 ** ((nt["midi"] - 69) / 12)
+            bends = nt.get("bends") or []
             legato = prev_hz is not None and abs(prev_end - nt["start"]) < 0.05
             for q, si in enumerate(src):
                 o = start_frame + q
@@ -271,16 +272,16 @@ def render(lines_audio: list[tuple[np.ndarray, int]], groups: list[list[int]], n
                 out_ap[o] = ap[si]
                 in_nuc = on_out <= q < on_out + nuc_n
                 tt = (q - on_out) * FRAME
-                h = hz
+                h = _bend_hz(nt, nt["start"] + tt) if bends else hz  # 한 글자를 여러 음으로 끌어 부르기
                 if in_nuc and legato and tt < 0.04:  # 앞 음에서 부드럽게 이어 올라가기
-                    h = prev_hz * (hz / prev_hz) ** (tt / 0.04)
-                if in_nuc and dur > 0.8 and tt > 0.35:  # 긴 음 비브라토
+                    h = prev_hz * (h / prev_hz) ** (tt / 0.04)
+                if in_nuc and dur > 0.8 and tt > 0.35 and not bends:  # 긴 음 비브라토
                     h *= 2 ** ((22 * min(1, (tt - 0.35) / 0.25) * np.sin(2 * np.pi * 5.4 * tt)) / 1200)
                 out_f0[o] = h if (in_nuc or f0[si] > 0) else 0.0
                 mask[o] = 1.0
             prev_start = nt["start"]
             prev_end = nt["start"] + dur
-            prev_hz = hz
+            prev_hz = 440.0 * 2 ** (((bends[-1][1] if bends else nt["midi"]) - 69) / 12)
 
     _ts = time.time()
     y = np.nan_to_num(pw.synthesize(out_f0, out_sp, out_ap, SRW, FRAME * 1000), nan=0.0, posinf=0.0, neginf=0.0)
@@ -305,6 +306,21 @@ def _heard(y: np.ndarray, sr: int) -> list[str] | None:
         return sing.HANGUL.findall(pronounce.transcribe(librosa.resample(y, orig_sr=sr, target_sr=16000), 16000)["text"])
     except Exception:  # noqa: BLE001
         return None
+
+
+def _bend_hz(nt: dict, at: float) -> float:
+    """bends 가 있는 음표에서 at초의 음 높이(Hz). 음이 바뀌는 순간은 40ms 동안 부드럽게 이어요"""
+    m, prev, tb = nt["midi"], None, 0.0
+    for bt, bm in nt.get("bends") or []:
+        if at >= bt:
+            prev, m, tb = m, bm, at - bt
+        else:
+            break
+    h = 440.0 * 2 ** ((m - 69) / 12)
+    if prev is not None and tb < 0.04:
+        p = 440.0 * 2 ** ((prev - 69) / 12)
+        h = p * (h / p) ** (tb / 0.04)
+    return h
 
 
 def _ratio(expect_orig: list[str], expect_pron: list[str], heard: list[str]) -> float:

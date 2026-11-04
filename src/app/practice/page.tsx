@@ -263,7 +263,14 @@ export default function PracticePage() {
     for (const nt of gen.notes.notes) {
       const a = Math.floor(nt.start / hop);
       const b = Math.min(n, Math.floor((nt.start + nt.dur - 0.03) / hop));
-      for (let i = a; i < b; i++) arr[i] = nt.midi;
+      // 한 글자를 여러 음으로 끌어 부르는 곳(bends)은 그 시각부터 바뀐 음으로 그려요
+      const bends = nt.bends ?? [];
+      for (let i = a; i < b; i++) {
+        const t = i * hop;
+        let m = nt.midi;
+        for (const [bt, bm] of bends) if (t >= bt) m = bm;
+        arr[i] = m;
+      }
     }
     return { ref: arr, empty: new Array(n).fill(null) as (number | null)[] };
   }, [gen]);

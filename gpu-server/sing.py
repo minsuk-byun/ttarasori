@@ -42,6 +42,46 @@ def fit_notes(notes: list[dict], n: int) -> list[dict]:
     return notes
 
 
+def fit_notes_keep(notes: list[dict], n: int) -> list[dict]:
+    """음표 수를 글자 수에 맞추되 멜로디는 그대로 지키기 (허밍 멜로디용).
+    음이 남으면 합쳐서 없애지 않고, 한 글자를 여러 음에 걸쳐 끌어 부르게 해요(멜리스마).
+    합친 음의 높이는 'bends': [[시작 시각(초), midi], …] 로 남겨서 노래·반주·화면이 모두 따라가요.
+    어느 음을 앞 글자에 붙일지: 앞 음과 쉼 없이 이어지고(레가토) 짧은 음부터. 쉼 뒤의 음은 새 글자로 남겨요."""
+    notes = [dict(x) for x in notes]
+    for x in notes:
+        x.setdefault("bends", [])
+    if len(notes) <= n:
+        return fit_notes(notes, n)
+
+    def cost(i: int) -> float:
+        prev, cur = notes[i - 1], notes[i]
+        gap = cur["start"] - (prev["start"] + prev["dur"])
+        c = cur["dur"]
+        if gap > 0.08:
+            c += 10.0  # 쉼 뒤에서 새로 시작하는 음은 되도록 새 글자로
+        c += 0.25 * len(prev["bends"])  # 한 글자에 음이 너무 몰리지 않게 (고르게 나눠요)
+        return c
+
+    while len(notes) > n and len(notes) > 1:
+        i = min(range(1, len(notes)), key=cost)
+        prev, cur = notes[i - 1], notes[i]
+        prev["bends"] = prev["bends"] + [[round(cur["start"], 4), cur["midi"]]] + cur["bends"]
+        prev["dur"] = round(cur["start"] + cur["dur"] - prev["start"], 4)
+        del notes[i]
+    return notes
+
+
+def pitch_at(nt: dict, t: float) -> float:
+    """음표 안 t초(절대 시각)의 목표 음 높이 (bends 가 있으면 그 시각 이후의 음)"""
+    m = nt["midi"]
+    for bt, bm in nt.get("bends") or []:
+        if t >= bt:
+            m = bm
+        else:
+            break
+    return m
+
+
 def ensure_min(notes: list[dict], min_dur: float = 0.2, keep: float = 0.3) -> list[dict]:
     """글자마다 최소 길이 보장: 너무 짧은 음은 뒤 쉼표나 이웃한 긴 음에서 시간을 가져와요.
     짧은 음에 글자가 몰리면 자음·모음·받침이 들어갈 시간이 없어 발음이 뭉개져요 ('너는 잘했어').

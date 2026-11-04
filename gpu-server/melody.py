@@ -65,6 +65,19 @@ def make_melody(bpm: int, minor: bool, low: bool, seed: int, bars: int = 8):
     return notes, total, tonic
 
 
+def expand_bends(notes):
+    """한 글자에 여러 음(bends)이 있는 음표를 음 하나씩으로 펼치기 (합성음·반주 조건용, 레가토로 이어 붙임)"""
+    out = []
+    for nt in notes:
+        pts = [(nt["start"], nt["midi"])] + [(float(t), m) for t, m in (nt.get("bends") or [])]
+        end = nt["start"] + nt["dur"]
+        for k, (t, m) in enumerate(pts):
+            t2 = pts[k + 1][0] if k + 1 < len(pts) else end
+            if t2 - t > 0.02:
+                out.append({"midi": m, "start": round(t, 4), "dur": round(t2 - t, 4), "syllable": nt.get("syllable", "")})
+    return out
+
+
 def render_melody(notes, total: float, sr: int) -> np.ndarray:
     """부드러운 배음 합성음 (레가토 글라이드·긴 음 비브라토)"""
     out = np.zeros(int(total * sr), dtype=np.float32)
