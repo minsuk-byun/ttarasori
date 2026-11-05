@@ -62,6 +62,7 @@ def generate(
     strength: float = 0.5,
     seed: int = -1,
     log=print,
+    max_wait: float = 900,
 ) -> dict:
     """노래 한 곡을 out(wav)으로 저장하고 정보(dict)를 돌려줘요"""
     body: dict = {
@@ -91,13 +92,13 @@ def generate(
 
     t0 = time.time()
     try:
-        return _run(body, out, t0, bpm, keyscale, strength if src_audio is not None else None, log)
+        return _run(body, out, t0, bpm, keyscale, strength if src_audio is not None else None, log, max_wait)
     finally:
         if tmp is not None:
             tmp.unlink(missing_ok=True)
 
 
-def _run(body: dict, out: Path, t0: float, bpm, keyscale, strength, log) -> dict:
+def _run(body: dict, out: Path, t0: float, bpm, keyscale, strength, log, max_wait: float = 900) -> dict:
     r = _post("/release_task", body)
     data = r.get("data") or {}
     task_id = data.get("task_id") if isinstance(data, dict) else None
@@ -106,7 +107,7 @@ def _run(body: dict, out: Path, t0: float, bpm, keyscale, strength, log) -> dict
     log(f"[ttarasori] ACE-Step 작업 {task_id} ({body['task_type']}, {body['audio_duration']}초, bpm {bpm}, {keyscale}, 세기 {strength})")
 
     item = None
-    while time.time() - t0 < 900:
+    while time.time() - t0 < max_wait:
         time.sleep(3)
         q = _post("/query_result", {"task_id_list": [task_id]}, timeout=30)
         rows = q.get("data") or []

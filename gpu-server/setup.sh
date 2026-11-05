@@ -143,13 +143,27 @@ fi
     for i in 1 2 3; do uv sync --python 3.11 && break; [ $i = 3 ] && exit 1; sleep $((i * 30)); done
     .venv/bin/python -c "import torch; print(\"ace torch\", torch.__version__, torch.cuda.is_available())"
   ' > /opt/ace-install.log 2>&1; then
-    log "ACE-Step 설치 완료, API 시작"
+    log "ACE-Step 설치 완료"
+    # 기본 서버 모델이 먼저 뜨도록 기다렸다가(내려받기 대역폭을 나눠 쓰지 않게) ACE-Step 모델을 받아요
+    for i in $(seq 1 120); do
+      python3 -c "import json,urllib.request as u; h=json.load(u.urlopen('http://127.0.0.1:8000/health', timeout=5)); exit(0 if h.get('practice_ready') else 1)" >/dev/null 2>&1 && break
+      sleep 30
+    done
+    log "ACE-Step 모델 내려받기 시작"
+    t0=$(date +%s)
+    for i in 1 2 3; do
+      (cd /opt/ace-step && HF_HOME=/opt/hf-cache timeout 3600 .venv/bin/acestep-download) >> /opt/ace-install.log 2>&1 && break
+      log "ACE-Step 모델 내려받기 재시도 ($i)"; sleep 30
+    done
+    log "ACE-Step 모델 내려받기 끝 ($(( $(date +%s) - t0 ))초), API 시작"
     cd /opt/ace-step && \
       ACESTEP_API_HOST=127.0.0.1 ACESTEP_API_PORT=8001 ACESTEP_DEVICE=cuda \
       ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false \
       ACESTEP_OFFLOAD_TO_CPU=true ACESTEP_DOWNLOAD_SOURCE=huggingface \
       HF_HOME=/opt/hf-cache UV_CACHE_DIR=/opt/uv-cache \
       nohup .venv/bin/acestep-api > /opt/ace-api.log 2>&1 &
+    # ACE-Step 의 오류 줄을 서버 기록(VESSL 로그)에도 남겨요
+    (tail -n 0 -F /opt/ace-api.log 2>/dev/null | grep --line-buffered -iE "error|traceback|exception|out of memory|killed" | sed -u 's/^/[ace] /' > /proc/1/fd/1) &
     # API 가 응답해도 모델은 첫 요청 때 내려받아요(첫 곡이 13분 넘게 걸렸어요).
     # 그래서 짧은 곡을 하나 미리 만들어 모델을 받아 두고, 그다음에 준비 완료로 표시해요 (최대 40분)
     api_up=0
@@ -160,7 +174,7 @@ fi
     if [ $api_up = 1 ]; then
       log "ACE-Step API 응답, 모델 미리 받기(짧은 곡 하나 만들기) 시작"
       t0=$(date +%s)
-      if (cd "$HERE" && timeout 2400 python3 -c "import pathlib, song; song.generate(pathlib.Path('/tmp/ace-warm.wav'), 'calm piano ballad', '', True, 15)") >> /opt/ace-api.log 2>&1; then
+      if (cd "$HERE" && timeout 2400 python3 -c "import pathlib, song; song.generate(pathlib.Path('/tmp/ace-warm.wav'), 'calm piano ballad', '', True, 15, max_wait=2400)") >> /opt/ace-api.log 2>&1; then
         touch /opt/ace-ok
         log "ACE-Step 준비 완료 (미리 받기 $(( $(date +%s) - t0 ))초)"
       else
