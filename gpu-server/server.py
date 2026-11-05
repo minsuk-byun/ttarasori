@@ -552,6 +552,7 @@ def run_job(job_id: str):
         # 허밍 분석 오류는 사용자가 고칠 수 있는 안내라서 그대로 보여 줘요
         msg = str(e) if type(e).__name__ == "HumError" else f"{what} 만들지 못했어요."
         job.update(status="error", error=msg, detail="".join(traceback.format_exception(e))[-2000:])
+        print(f"[ttarasori] 작업 실패 ({job.get('kind')}, {job.get('engine', '-')}): {type(e).__name__}: {str(e)[:300]}", flush=True)
 
 
 def worker():

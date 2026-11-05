@@ -146,16 +146,29 @@ fi
     log "ACE-Step 설치 완료, API 시작"
     cd /opt/ace-step && \
       ACESTEP_API_HOST=127.0.0.1 ACESTEP_API_PORT=8001 ACESTEP_DEVICE=cuda \
-      ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=true ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B \
-      ACESTEP_LM_BACKEND=pt ACESTEP_OFFLOAD_TO_CPU=true ACESTEP_DOWNLOAD_SOURCE=huggingface \
+      ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false \
+      ACESTEP_OFFLOAD_TO_CPU=true ACESTEP_DOWNLOAD_SOURCE=huggingface \
       HF_HOME=/opt/hf-cache UV_CACHE_DIR=/opt/uv-cache \
       nohup .venv/bin/acestep-api > /opt/ace-api.log 2>&1 &
-    # 모델 내려받기·불러오기가 끝나 API 가 응답하면 표시해요 (최대 40분)
-    for i in $(seq 1 240); do
-      if python3 -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8001/v1/models', timeout=5)" >/dev/null 2>&1; then touch /opt/ace-ok; log "ACE-Step 준비 완료"; break; fi
+    # API 가 응답해도 모델은 첫 요청 때 내려받아요(첫 곡이 13분 넘게 걸렸어요).
+    # 그래서 짧은 곡을 하나 미리 만들어 모델을 받아 두고, 그다음에 준비 완료로 표시해요 (최대 40분)
+    api_up=0
+    for i in $(seq 1 120); do
+      if python3 -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8001/v1/models', timeout=5)" >/dev/null 2>&1; then api_up=1; break; fi
       sleep 10
     done
-    [ -f /opt/ace-ok ] || log "ACE-Step API 가 응답하지 않아요: $(tail -3 /opt/ace-api.log | tr '\n' ' ' | cut -c1-300)"
+    if [ $api_up = 1 ]; then
+      log "ACE-Step API 응답, 모델 미리 받기(짧은 곡 하나 만들기) 시작"
+      t0=$(date +%s)
+      if (cd "$HERE" && timeout 2400 python3 -c "import pathlib, song; song.generate(pathlib.Path('/tmp/ace-warm.wav'), 'calm piano ballad', '', True, 15)") >> /opt/ace-api.log 2>&1; then
+        touch /opt/ace-ok
+        log "ACE-Step 준비 완료 (미리 받기 $(( $(date +%s) - t0 ))초)"
+      else
+        log "ACE-Step 미리 받기 실패: $(tail -3 /opt/ace-api.log | tr '\n' ' ' | cut -c1-300)"
+      fi
+    else
+      log "ACE-Step API 가 응답하지 않아요: $(tail -3 /opt/ace-api.log | tr '\n' ' ' | cut -c1-300)"
+    fi
   else
     log "ACE-Step 설치 실패 (예전 방식으로 동작): $(tail -4 /opt/ace-install.log | tr '\n' ' ' | cut -c1-400)"
   fi

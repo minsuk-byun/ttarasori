@@ -86,7 +86,8 @@ def generate(
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src_audio), "-ac", "2", "-ar", "44100", str(tmp)], check=True)
         body.update(task_type="cover", src_audio_path=str(tmp), audio_cover_strength=float(strength), thinking=False)
     else:
-        body.update(task_type="text2music", thinking=True)
+        # 계획 모델(LM)은 쓰지 않아요: CPU 로 오가며 느려져서 45초 곡이 15분 안에 안 끝났어요
+        body.update(task_type="text2music", thinking=False)
 
     t0 = time.time()
     try:
@@ -113,6 +114,7 @@ def _run(body: dict, out: Path, t0: float, bpm, keyscale, strength, log) -> dict
             continue
         row = rows[0]
         if row.get("status") == 2:
+            log(f"[ttarasori] ACE-Step 생성 실패: {str(row)[:400]}")
             raise RuntimeError(f"ACE-Step 생성 실패: {str(row)[:400]}")
         if row.get("status") == 1:
             res = row.get("result")
@@ -120,6 +122,7 @@ def _run(body: dict, out: Path, t0: float, bpm, keyscale, strength, log) -> dict
             item = items[0] if items else None
             break
     if not item or not item.get("file"):
+        log(f"[ttarasori] ACE-Step 결과를 {time.time() - t0:.0f}초 기다렸지만 오지 않았어요")
         raise RuntimeError("ACE-Step 결과를 기다리다 시간이 지났어요")
 
     url = item["file"]
