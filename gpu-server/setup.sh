@@ -92,6 +92,19 @@ start_tunnel() {
 # /root 는 Workspace 를 저장·복원할 때 같이 따라오는 작은 공간이에요. 예전 캐시(가사 정렬 모델 1.2GB 등)가 쌓여
 # 가득 차면 터널 프로그램조차 못 써서 서버가 연결되지 않았어요 → 시작할 때마다 캐시를 비우고, 큰 파일은 /opt 에 둬요.
 rm -rf /root/.cache /root/seed-vc /root/cloudflared /root/cloudflared.log 2>/dev/null || true
+# 모델·설치 파일 보관: VESSL 저장소(볼륨)를 /persist 에 연결해 두면, 다시 켤 때 내려받기·설치를 건너뛰어요.
+# /opt 아래 큰 폴더들을 저장소 안으로 연결해요. 준비 표시 파일(*-ok)과 기록(*.log)은 매번 새로 만들어요.
+PERSIST="${TTARASORI_PERSIST:-/persist}"
+if [ -d "$PERSIST" ] && touch "$PERSIST/.write-test" 2>/dev/null; then
+  for d in hf-cache torch-cache cache uv-cache uv-python ace-step seed-vc melo-venv; do
+    mkdir -p "$PERSIST/$d"
+    if [ ! -L "/opt/$d" ]; then rm -rf "/opt/$d"; ln -s "$PERSIST/$d" "/opt/$d"; fi
+  done
+  log "저장소 연결됨: $PERSIST (남은 용량 $(df -h "$PERSIST" | awk 'NR==2{print $4}'))"
+else
+  log "저장소 없음: 모델을 매번 새로 내려받아요 (VESSL 저장소를 $PERSIST 에 연결하면 다시 켤 때 빨라져요)"
+fi
+
 export TORCH_HOME=/opt/torch-cache XDG_CACHE_HOME=/opt/cache PIP_CACHE_DIR=/opt/cache/pip
 log "디스크 남은 용량(시작): $(df -h /root | tail -1 | awk '{print $4}') (/root)"
 
@@ -137,7 +150,8 @@ fi
     pip install -q --no-cache-dir uv
     command -v python3.11 >/dev/null 2>&1 || (apt-get install -y -qq python3.11 python3.11-venv python3.11-dev >/dev/null 2>&1 || true)
     if [ ! -d /opt/ace-step/.git ]; then
-      for i in 1 2 3; do timeout 300 git clone -q --depth 1 https://github.com/ACE-Step/ACE-Step-1.5.git /opt/ace-step && break; rm -rf /opt/ace-step; sleep 20; done
+      mkdir -p /opt/ace-step
+      for i in 1 2 3; do find /opt/ace-step/ -mindepth 1 -delete; timeout 300 git clone -q --depth 1 https://github.com/ACE-Step/ACE-Step-1.5.git /opt/ace-step && break; sleep 20; done
     fi
     cd /opt/ace-step
     for i in 1 2 3; do uv sync --python 3.11 && break; [ $i = 3 ] && exit 1; sleep $((i * 30)); done
@@ -191,8 +205,9 @@ fi
 # 큰 파일(모델·캐시)은 /root 밖(/opt)에 둬요.
 # /root 는 Workspace 를 중지할 때 저장·복원되는데, 모델까지 들어가면 복원하다 디스크가 가득 차서 서버가 못 떠요.
 rm -rf /root/seed-vc /root/.cache/huggingface 2>/dev/null || true
-if [ ! -d /opt/seed-vc ]; then
+if [ ! -d /opt/seed-vc/.git ]; then  # 저장소에 빈 폴더만 있을 때도 받도록 .git 으로 확인
   log "Seed-VC 내려받는 중"
+  mkdir -p /opt/seed-vc && find /opt/seed-vc/ -mindepth 1 -delete  # 저장소 쪽 폴더(링크)는 두고 안만 비워요
   git clone -q https://github.com/Plachtaa/seed-vc /opt/seed-vc
   git -C /opt/seed-vc checkout -q "$SEED_VC_COMMIT"
 fi
